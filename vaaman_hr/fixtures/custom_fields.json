@@ -52,7 +52,7 @@
         "fieldname": "custom_attendance_type",
         "fieldtype": "Select",
         "label": "Attendance Type",
-        "options": "Outdoor duty\nTraining Days\nMedical Gatepass\nHoliday\nPresent on Weekly off\nPresent on Weekly off Holiday\nOT Days",
+        "options": "\nOutdoor duty\nTraining Days\nMedical Gatepass\nHoliday\nPresent on Weekly off\nPresent on Weekly off Holiday\nOT Days",
         "insert_after": "attendance",
         "__islocal": 1
     },
