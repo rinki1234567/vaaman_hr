@@ -3,6 +3,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, date_diff, format_date, get_url_to_list, getdate
 from hrms.hr.doctype.compensatory_leave_request.compensatory_leave_request import CompensatoryLeaveRequest
+from vaaman_hr.vaaman_hr.over_time import get_existing_allocation_for_period
+
 
 from hrms.hr.utils import (
 	create_additional_leave_ledger_entry,
