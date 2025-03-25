@@ -3,7 +3,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, date_diff, format_date, get_url_to_list, getdate
 from hrms.hr.doctype.compensatory_leave_request.compensatory_leave_request import CompensatoryLeaveRequest
-
+from vaaman_hr.vaaman_hr.over_time import get_existing_allocation_for_period
 from hrms.hr.utils import (
 	create_additional_leave_ledger_entry,
 	get_holiday_dates_for_employee,
@@ -39,12 +39,8 @@ class CompOff(CompensatoryLeaveRequest):
             frappe.throw(_("You are not present all day(s) between compensatory leave request days"))
 
     def validate_holidays(self):
-        try:
-            frappe.logger().info(f"Starting validate_holidays for Employee: {self.employee}")
             holidays = get_holiday_dates_for_employee(self.employee, self.work_from_date, self.work_end_date)
             holiday_list = frappe.db.get_value('Employee', self.employee, 'holiday_list')
-            frappe.logger().info(f"Holiday List: {holiday_list}")
-
             # Fetch attendance records including "Weekly Off"
             attendance_records = frappe.get_all(
                 "Attendance",
@@ -56,58 +52,48 @@ class CompOff(CompensatoryLeaveRequest):
                 },
                 fields=["attendance_date", "status", "custom_over_time"],
             )
-            frappe.logger().info(f"Attendance Records: {attendance_records}")
-
             weekend = frappe.db.sql(
-                """
-                SELECT 
-                    a.attendance_date, a.status, h.holiday_date, h.weekly_off 
-                FROM 
-                    `tabAttendance` a
-                LEFT JOIN 
-                    `tabHoliday` h ON a.attendance_date = h.holiday_date
-                WHERE 
-                    a.employee = %(employee)s
-                    AND a.attendance_date BETWEEN %(start_date)s AND %(end_date)s
-                    AND a.docstatus = 1
-                    AND h.parent = %(holiday_list)s
-                    AND h.weekly_off = 1
-                """,
-                {
-                    "employee": self.employee,
-                    "start_date": self.work_from_date,
-                    "end_date": self.work_end_date,
-                    "holiday_list": holiday_list,
-                },
-                as_dict=True,
-            )
-            frappe.logger().info(f"Weekend Records: {weekend}")
+                            """
+                            SELECT 
+                                a.attendance_date, a.status, h.holiday_date, h.weekly_off 
+                            FROM 
+                                `tabAttendance` a
+                            LEFT JOIN 
+                                `tabHoliday` h ON a.attendance_date = h.holiday_date
+                            WHERE 
+                                a.employee = %(employee)s
+                                AND a.attendance_date BETWEEN %(start_date)s AND %(end_date)s
+                                AND a.docstatus = 1
+                                AND h.parent = %(holiday_list)s
+                                AND h.weekly_off = 1
+                            """,
+                            {
+                                "employee": self.employee,
+                                "start_date": self.work_from_date,
+                                "end_date": self.work_end_date,
+                                "holiday_list": holiday_list,
+                            },
+                            as_dict=True,
+                        )
 
             # Filter for "Weekly Off" days with overtime
-            overtime_days = [entry.attendance_date for entry in attendance_records if entry.custom_over_time > 0 and entry.status == "Weekly Off"]
-            wfh = [entry.attendance_date for entry in attendance_records if entry.status == "Work From Home"]
+            overtime_days = [entry.attendance_date for entry in attendance_records if entry.custom_over_time > 0 and entry.status =="Weekly Off"] 
+            wfh = [entry.attendance_date for entry in attendance_records if entry.status =="Work From Home"]
             weekend_days = [entry["attendance_date"] for entry in weekend if entry["weekly_off"] == 1]
 
-            frappe.logger().info(f"Overtime Days: {overtime_days}")
-            frappe.logger().info(f"Work From Home Days: {wfh}")
-            frappe.logger().info(f"Weekend Days: {weekend_days}")
-
             # Check if there are valid holidays or weekly off days with overtime
-            if holidays or overtime_days or weekend_days or wfh:
-                frappe.msgprint("Compensatory leave will be added for the following dates: {}".format(
-                    ", ".join([frappe.bold(format_date(day)) for day in overtime_days or holidays or wfh or weekend_days])
-                ))
+            if holidays  or overtime_days or weekend_days or wfh:
+                frappe.msgprint("Compensatory leave will be added for the following dates: {}".format(", ".join([frappe.bold(format_date(day)) for day in overtime_days or holidays or wfh or weekend_days])))
             elif not holidays and not overtime_days:
                 if date_diff(self.work_end_date, self.work_from_date):
-                    msg = _(f"The days between {format_date(self.work_from_date)} to {format_date(self.work_end_date)} are not valid holidays or weekly offs with overtime.")
+                    msg = _("The days between {0} to {1} are not valid holidays or weekly offs with overtime.").format(
+                        frappe.bold(format_date(self.work_from_date)),
+                        frappe.bold(format_date(self.work_end_date)),
+                    )
                 else:
-                    msg = _(f"{format_date(self.work_from_date)} is not a holiday or a weekly off with overtime.")
-                frappe.throw(msg)
-        
-        except Exception as e:
-            frappe.log_error(f"Error in validate_holidays: {str(e)}", "Validate Holidays Error")
-            frappe.throw(_("An unexpected error occurred. Please check the error log for more details."))
+                    msg = _("{0} is not a holiday or a weekly off with overtime.").format(frappe.bold(format_date(self.work_from_date)))
 
+                frappe.throw(msg)
 
 
     def on_submit(self):
