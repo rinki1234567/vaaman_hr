@@ -5,7 +5,6 @@ from frappe.utils import add_days, cint, date_diff, format_date, get_url_to_list
 from hrms.hr.doctype.compensatory_leave_request.compensatory_leave_request import CompensatoryLeaveRequest
 from vaaman_hr.vaaman_hr.over_time import get_existing_allocation_for_period
 
-
 from hrms.hr.utils import (
 	create_additional_leave_ledger_entry,
 	get_holiday_dates_for_employee,
@@ -60,9 +59,9 @@ class CompOff(CompensatoryLeaveRequest):
             )
             frappe.logger().info(f"Weekend Records: {weekend}")
 
-            overtime_days = [entry.attendance_date for entry in attendance_records if entry.custom_over_time > 0 and entry.status == "Weekly Off"]
-            wfh = [entry.attendance_date for entry in attendance_records if entry.status == "Work From Home"]
-            weekend_days = [entry["attendance_date"] for entry in weekend if entry["weekly_off"] == 1]
+            overtime_days = [entry.attendance_date for entry in attendance_records if entry.get("custom_over_time", 0) > 0 and entry.get("status") == "Weekly Off"]
+            wfh = [entry.attendance_date for entry in attendance_records if entry.get("status") == "Work From Home"]
+            weekend_days = [entry["attendance_date"] for entry in weekend if entry.get("weekly_off") == 1]
 
             all_dates = list(set(overtime_days + holidays + wfh + weekend_days))
             all_dates.sort()
