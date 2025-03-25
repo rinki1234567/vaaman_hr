@@ -96,9 +96,16 @@ class CompOff(CompensatoryLeaveRequest):
             frappe.logger().info(f"Weekend Days: {weekend_days}")
 
             if holidays or overtime_days or weekend_days or wfh:
-                frappe.msgprint("Compensatory leave will be added for the following dates: {}".format(
-                    ", ".join([frappe.bold(format_date(day)) for day in overtime_days + holidays + wfh + weekend_days])
-                ))
+                unique_days = set(overtime_days + holidays + wfh + weekend_days)
+
+                if unique_days:
+                    frappe.msgprint("Compensatory leave will be added for the following dates: {}".format(
+                        ", ".join([frappe.bold(format_date(day)) for day in sorted(unique_days)])
+                    ))
+                else:
+                    msg = _(f"The days between {format_date(self.work_from_date)} to {format_date(self.work_end_date)} are not valid holidays or weekly offs with overtime.")
+                    frappe.throw(msg)
+
             else:
                 msg = _(f"The days between {format_date(self.work_from_date)} to {format_date(self.work_end_date)} are not valid holidays or weekly offs with overtime.")
                 frappe.throw(msg)
