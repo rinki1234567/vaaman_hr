@@ -1,0 +1,34 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2025-05-09 09:11:12.630712",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letterhead": null,
+ "modified": "2025-05-09 09:11:12.630712",
+ "modified_by": "Administrator",
+ "module": "Vaaman Hr",
+ "name": "Employee Leave Balance(Custom)",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Leave Allocation",
+ "report_name": "Employee Leave Balance(Custom)",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "HR Manager"
+  },
+  {
+   "role": "HR User"
+  },
+  {
+   "role": "Employee Self Service"
+  }
+ ],
+ "timeout": 0
+}
