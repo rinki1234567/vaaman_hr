@@ -1,0 +1,80 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"F46b2sj-N4\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Vaaman HR</span>\",\"col\":12}},{\"id\":\"RNFYBLRMJj\",\"type\":\"card\",\"data\":{\"card_name\":\"Custom Report\",\"col\":4}}]",
+ "creation": "2025-05-09 09:21:18.258913",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "color-monthly-rank",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Vaaman HR",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Employee Leave Balance",
+   "link_count": 0,
+   "link_to": "Employee Leave Balance(Custom)",
+   "link_type": "Report",
+   "onboard": 0,
+   "report_ref_doctype": "Leave Allocation",
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Custom Report",
+   "link_count": 3,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Employee Leave Balance",
+   "link_count": 0,
+   "link_to": "Employee Leave Balance(Custom)",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Monthly Attendance",
+   "link_count": 0,
+   "link_to": "Monthly Attendance",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Overtime Report",
+   "link_count": 0,
+   "link_to": "Overtime Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2025-05-09 10:04:21.333758",
+ "modified_by": "Administrator",
+ "module": "Vaaman Hr",
+ "name": "Vaaman HR",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 1.0,
+ "shortcuts": [],
+ "title": "Vaaman HR"
+}
