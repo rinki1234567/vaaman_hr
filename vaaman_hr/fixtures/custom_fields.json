@@ -9,6 +9,7 @@
         "label": "Holiday List",
         "options": "Holiday List",
         "insert_after": "custom_branch",
+        "fetch_from":"employee.holiday_list",
         "__islocal": 1
     },
     {   "doctype": "Custom Field",
