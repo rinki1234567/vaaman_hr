@@ -42,7 +42,8 @@
         "label": "Branch",
         "options": "Branch",
         "insert_after": "company",
-        "__islocal": 1
+        "__islocal": 1,
+        "fetch_from":"employee.branch"
     },
     {
         "doctype": "Custom Field",
