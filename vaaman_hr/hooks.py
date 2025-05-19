@@ -127,9 +127,11 @@ before_app_install = "vaaman_hr.vaaman_hr.patches.apply_monkey_patch"
 
 override_doctype_class = { 
         "Attendance": "vaaman_hr.vaaman_hr.api.vaaman_hr" ,
+         "Attendance": "vaaman_hr.late_entry_log.CustomAttendance",
         "Compensatory Leave Request": "vaaman_hr.vaaman_hr.compoff.CompOff"
         } 
-        
+
+     
 # Document Events
 # ---------------
 # Hook on document methods and events
@@ -189,6 +191,11 @@ scheduler_events = {
     #         "vaaman_hr.purchase_invoice.create_payment_request"
     #     ]
     # }
+}
+scheduler_events = {
+    "daily": [
+        "vaaman_hr.late_entry_atten.process_attendance_policy"
+    ]
 }
 
 
