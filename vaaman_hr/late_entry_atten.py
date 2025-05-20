@@ -54,6 +54,24 @@ def process_attendance_policy():
                         "remarks": "Exceeded 3 late entries (based on in_time)"
                     }).insert(ignore_permissions=True)
 
+                    # Create Leave Application instead of Leave Ledger Entry
+                    leave_app = frappe.get_doc({
+                        "doctype": "Leave Application",
+                        "employee": original.employee,
+                        "leave_type": "Privilege Leave",
+                        "from_date": amended_att.attendance_date,
+                        "to_date": amended_att.attendance_date,
+                        "posting_date": nowdate(),
+                        "description": "Auto-created due to policy violation (Late Entry)",
+                        "follow_via_attendance": 1,
+                        "docstatus": 1,
+                        "status":"Approved",
+                    })
+                    leave_app.insert(ignore_permissions=True)
+                    leave_app.submit()
+
+
+
                     # Send notification
                     user_id = frappe.db.get_value("Employee", employee, "user_id")
                     if user_id:
