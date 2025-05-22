@@ -198,6 +198,18 @@ class vaaman_hr(OriginalAttendance):
         if not emp:
             frappe.throw(_("Employee {0} is not active or does not exist").format(self.employee))
 
+    def on_trash(self):
+        # Delete linked Attendance Policy Logs
+        frappe.db.delete("Attendance Policy Log", {"attendance": self.name})
+        frappe.db.commit()
+       
+
+    def on_cancel(self):
+        # Delete linked Attendance Policy Logs
+        frappe.db.delete("Attendance Policy Log", {"attendance": self.name})
+        frappe.db.commit()
+        super().on_cancel()
+
 
 # Register the custom class as the new implementation for the 'Attendance' doctype
 Attendance = vaaman_hr
