@@ -13,7 +13,7 @@ def prorata_leave_allocation(leave_type: str, fiscal_year: str):
         doj = getdate(emp.date_of_joining)
         alloc_start = doj if doj > fy_start else fy_start
 
-        # Skip if employee joined after fiscal year ends
+        # Skip if employee joined after fiscal  year ends
         if alloc_start > fy_end:
             continue
 

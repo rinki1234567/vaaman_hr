@@ -9,6 +9,7 @@ import frappe
 from frappe import _
 from frappe.query_builder.functions import Count, Extract, Sum
 from frappe.utils import cint, cstr, getdate
+from frappe.utils.nestedset import get_descendants_of
 
 Filters = frappe._dict
 
@@ -30,6 +31,16 @@ def execute(filters: Filters | None = None) -> tuple:
 
 	if not (filters.month and filters.year):
 		frappe.throw(_("Please select month and year."))
+
+	
+	if not filters.company:
+		frappe.throw(_("Please select company."))
+
+	if filters.company:
+		filters.companies = [filters.company]
+		if filters.include_company_descendants:
+			filters.companies.extend(get_descendants_of("Company", filters.company))
+
 
 	attendance_map = get_attendance_map(filters)
 	if not attendance_map:
