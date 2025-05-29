@@ -14,4 +14,4 @@ def calculate_overtime_hours(doc, method):
     """, (doc.employee, doc.start_date, doc.end_date))[0][0] or 0
     
     # Update the total_overtime_hours field in Salary Slip
-    doc.custom_total_overtime_hours = total_overtime
+    doc.total_overtime_hours = total_overtime
