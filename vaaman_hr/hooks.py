@@ -153,10 +153,12 @@ doc_events = {
         "on_submit": "vaaman_hr.purchase_invoice.validate_invoice_outstanding"
     },
         "Salary Slip": {
-        "before_save": "vaaman_hr.vaaman_hr.salary_slip_hooks.calculate_overtime_hours"
+        "before_save": "vaaman_hr.vaaman_hr.salary_slip_hooks.calculate_overtime_hours",
+        "validate": "vaaman_hr.vaaman_hr.weekly_off.set_total_weekly_off"
     }
 
 }
+
 
 # Scheduled Tasks
 # ---------------
