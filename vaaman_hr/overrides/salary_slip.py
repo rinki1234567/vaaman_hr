@@ -4,7 +4,6 @@ from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSa
 import frappe
 from frappe.utils import getdate
 from datetime import timedelta
-from hrms.hr.utils import get_holidays
 from hrms.hr.utils import get_holiday_dates_for_employee
 
 class CustomSalarySlip(ERPNextSalarySlip):
