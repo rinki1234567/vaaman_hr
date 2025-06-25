@@ -103,6 +103,20 @@
         "insert_after": "working_hours",
         "__islocal": 1
     },
+
+        {
+        "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary-Structure-Assignment-override-weekly-off-with-absent",
+        "fieldname": "override_weekly_off_with_absent",
+        "fieldtype": "Check",
+        "label": "Override Weekly Off With Absent",
+        "insert_after": "weekly_off_on_attendance",
+        "__islocal": 1,
+        "allow_on_submit": "1"
+    },
+
     {
         "doctype": "Property Setter",
         "doctype_or_field": "DocField",
@@ -115,6 +129,7 @@
         "__islocal": 1,
         "name": "Leave Type-earned_leave_frequency-options"
     },
+
     {
         "doctype": "Property Setter",
         "doctype_or_field": "DocField",

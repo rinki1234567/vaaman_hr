@@ -13,13 +13,32 @@ class CustomSalarySlip(ERPNextSalarySlip):
         start_date = getdate(self.start_date)
         end_date = getdate(self.end_date)
 
-        holidays = get_holiday_dates_for_employee(self.employee,start_date, end_date)
+        holidays = get_holiday_dates_for_employee(self.employee, start_date, end_date)
         total_days = (end_date - start_date).days + 1
         working_days = 0
         absent_days = 0
 
+        # Fetch active salary structure assignment during this period
+        structure_assignment = frappe.db.get_value(
+            "Salary Structure Assignment",
+            {
+                "employee": self.employee,
+                "from_date": ["<=", end_date],
+                "to_date": ["is", "set"],
+                "docstatus": 1
+            },
+            ["name", "override_weekly_off_with_absent"],
+            order_by="from_date desc"
+        )
+
+        override_absent_on_holiday = 0
+        if structure_assignment:
+            _, override_absent_on_holiday = structure_assignment
+            override_absent_on_holiday = int(override_absent_on_holiday or 0)
+
         for i in range(total_days):
             current_date = start_date + timedelta(days=i)
+
             if (not joining_date or current_date >= joining_date) and (not relieving_date or current_date <= relieving_date):
                 att = frappe.get_value("Attendance", {
                     "employee": self.employee,
@@ -27,9 +46,17 @@ class CustomSalarySlip(ERPNextSalarySlip):
                     "docstatus": 1
                 }, "status")
 
-                if att == "Absent":
+                # If override is enabled: always count 'Absent' regardless of holiday
+                if override_absent_on_holiday and att == "Absent":
                     absent_days += 1
-                elif current_date not in holidays:
+                # Otherwise, skip holidays
+                elif not override_absent_on_holiday:
+                    if att == "Absent" and current_date not in holidays:
+                        absent_days += 1
+                    elif att != "Absent" and current_date not in holidays:
+                        working_days += 1
+                # If it's a holiday and not absent, skip it
+                elif att != "Absent" and current_date not in holidays:
                     working_days += 1
 
         self.total_working_days = working_days
