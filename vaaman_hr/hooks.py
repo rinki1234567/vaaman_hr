@@ -156,7 +156,8 @@ doc_events = {
     },
         "Salary Slip": {
         "before_save": "vaaman_hr.vaaman_hr.salary_slip_hooks.calculate_overtime_hours",
-        "validate": "vaaman_hr.vaaman_hr.weekly_off.set_total_weekly_off"
+        "validate": "vaaman_hr.vaaman_hr.weekly_off.set_total_weekly_off",
+        "validate": "vaaman_hr.vaaman_hr.weekly_off.before_save"
     }
 
 }

@@ -36,14 +36,36 @@
     {   "doctype": "Custom Field",
         "dt": "Salary Slip",
         "module": "Vaaman Hr",
-        "name": "Employee-total-weekly-off",
+        "name": "salary-total-weekly-off",
         "fieldname": "total_weekly_off",
+        "read_only": 1,
         "fieldtype": "Float",
-        "label": "Total Weekly Off",        
+        "label": "Total Weekly Off",      
         "insert_after": "leave_without_pay",
         "__islocal": 1
        },
-
+       {   "doctype": "Custom Field",
+        "dt": "Salary Slip",
+        "module": "Vaaman Hr",
+        "name": "salary-sal-weekoff",
+        "fieldname": "sal_weekoff",
+        "fieldtype": "Int",
+        "read_only": 1,
+        "label": "Salary Weekoff",        
+        "insert_after": "total_weekly_off",
+        "__islocal": 1
+       },
+        {   "doctype": "Custom Field",
+        "dt": "Salary Slip",
+        "module": "Vaaman Hr",
+        "name": "Salary-Standard-Weekly-Off",
+        "fieldname": "standard_weekly_off",
+        "fieldtype": "Int",
+        "read_only": 1,
+        "label": "Standard Weekly Off",        
+        "insert_after": "total_overtime_hours",
+        "__islocal": 1
+       },
        {"doctype": "Custom Field",
         "dt": "Salary Slip",
         "module": "Vaaman Hr",
@@ -104,7 +126,7 @@
         "__islocal": 1
     },
 
-        {
+    {
         "doctype": "Custom Field",
         "dt": "Salary Structure Assignment",
         "module": "Vaaman Hr",
@@ -114,7 +136,7 @@
         "label": "Override Weekly Off With Absent",
         "insert_after": "weekly_off_on_attendance",
         "__islocal": 1,
-        "allow_on_submit": "1"
+        "allow_on_submit": 1
     },
 
     {
