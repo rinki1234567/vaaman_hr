@@ -6,7 +6,7 @@ from collections import defaultdict
 def process_attendance_policy():
     # Get all attendance records from June 1st onward with in_time between 10:01 and 11:00
     attendance_records = frappe.db.sql("""
-        SELECT name, employee, attendance_date, in_time
+        SELECT name, employee, attendance_date, in_time, attendance_request
         FROM `tabAttendance`
         WHERE status = 'Present'
         AND docstatus = 1
@@ -24,6 +24,10 @@ def process_attendance_policy():
     for employee, late_days in employee_late_days.items():
         if len(late_days) > 3:
             for i, record in enumerate(late_days[3:], start=4):  # 4th onwards
+                # Skip if linked to an Attendance Request
+                if record["attendance_request"]:
+                    continue
+
                 try:
                     original = frappe.get_doc("Attendance", record["name"])
 
