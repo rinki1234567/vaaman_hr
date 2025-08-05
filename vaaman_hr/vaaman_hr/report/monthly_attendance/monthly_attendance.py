@@ -18,6 +18,8 @@ status_map = {
 	"Absent": "A",
 	"Half Day": "HD",
 	"Work From Home": "WFH",
+	"Half Day/Other Half Absent": "HD/A",
+	"Half Day/Other Half Present": "HD/P",
 	"On Leave": "L",
 	"Holiday": "H",
 	"Weekly Off": "WO",
@@ -267,12 +269,24 @@ def get_attendance_map(filters: Filters) -> dict:
 
 def get_attendance_records(filters: Filters) -> list[dict]:
 	Attendance = frappe.qb.DocType("Attendance")
+	status = (
+		frappe.qb.terms.Case()
+		.when(
+			(Attendance.status == "Half Day" and (Attendance.half_day_status == "Present")),
+			"Half Day/Other Half Present",
+		)
+		.when(
+			(Attendance.status == "Half Day" and (Attendance.half_day_status == "Absent")),
+			"Half Day/Other Half Absent",
+		)
+		.else_(Attendance.status)
+	)
 	query = (
 		frappe.qb.from_(Attendance)
 		.select(
 			Attendance.employee,
 			Extract("day", Attendance.attendance_date).as_("day_of_month"),
-			Attendance.status,
+			(status).as_("status"),
 			# Attendance.shift,
 		)
 		.where(
