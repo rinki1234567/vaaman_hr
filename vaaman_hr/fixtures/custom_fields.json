@@ -159,7 +159,7 @@
         "module": "Vaaman Hr",
         "field_name": "status",
         "property": "options",
-        "value": "Present\nAbsent\nOn Leave\nHalf Day\nWork From Home\nWeekly Off",
+        "value": "Present\nAbsent\nOn Leave\nHalf Day\nWork From Home\nWeekly Off\nHoliday",
         "property_type": "Select",
         "__islocal": 1,
         "name": "Attendance-status-options"
