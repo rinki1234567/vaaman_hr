@@ -24,7 +24,7 @@ def update_attendance_status_options():
     # Find the Status field and update its options
     for field in doctype.fields:
         if field.fieldname == "status":
-            field.options = "Present\nAbsent\nOn Leave\nHalf Day\nWork From Home\nWeekly Off"
+            field.options = "Present\nAbsent\nOn Leave\nHalf Day\nWork From Home\nWeekly Off\nHoliday"
             break
     
     # Add the custom fields if they don't already exist
