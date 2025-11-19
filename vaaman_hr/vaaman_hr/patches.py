@@ -30,7 +30,11 @@ def custom_get_monthly_earned_leave(
 
     return earned_leaves
 
-def apply_monkey_patch():
+def apply_monkey_patch(app_name=None):
+    """
+    Apply monkey patch to hrms.hr.utils.get_monthly_earned_leave
+    Called by Frappe's before_app_install hook with app_name parameter
+    """
     import hrms.hr.utils
     hrms.hr.utils.get_monthly_earned_leave = custom_get_monthly_earned_leave
     # print("Monkey patch applied: hrms.hr.utils.get_monthly_earned_leave")
