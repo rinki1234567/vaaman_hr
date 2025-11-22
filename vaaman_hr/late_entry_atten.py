@@ -11,6 +11,7 @@ def process_attendance_policy():
         AND docstatus = 1
         AND TIME(in_time) BETWEEN '10:01:00' AND '11:00:00'
         AND attendance_date >= '2025-06-01'
+        AND custom_branch = 'Head Office'
         ORDER BY employee, attendance_date
     """, as_dict=True)
 
