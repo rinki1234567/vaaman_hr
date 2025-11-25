@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-11-25 13:24:01.828197",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "location_t_section",
+  "branch",
+  "given_features",
+  "app_version",
+  "shift_end_cushion"
+ ],
+ "fields": [
+  {
+   "fieldname": "location_t_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch"
+  },
+  {
+   "fieldname": "given_features",
+   "fieldtype": "Table",
+   "label": "Given Features",
+   "options": "Vaaman Features Child"
+  },
+  {
+   "fieldname": "app_version",
+   "fieldtype": "Int",
+   "label": "App Version"
+  },
+  {
+   "default": "5",
+   "fieldname": "shift_end_cushion",
+   "fieldtype": "Int",
+   "label": "Shift End Cushion"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-11-25 13:24:01.828197",
+ "modified_by": "Administrator",
+ "module": "Vaaman Hr",
+ "name": "VaamanHR Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
