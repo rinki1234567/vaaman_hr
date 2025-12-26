@@ -17,7 +17,6 @@ app_license = "mit"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/vaaman_hr/css/vaaman_hr.css"
-# web_include_js = "/assets/vaaman_hr/js/vaaman_hr.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "vaaman_hr/public/scss/website"
@@ -145,10 +144,11 @@ override_doctype_class = {
 # 	}
 # }
 doc_events = {
-     "OverTime Import": {
+    "Attendance": {
         "on_submit": "vaaman_hr.vaaman_hr.over_time.calculate_compensatory_leave",
         "on_cancel": "vaaman_hr.vaaman_hr.over_time.cancel_compensatory_leave"
     },
+    
     
     "Payment Request": {
         "on_submit": "vaaman_hr.purchase_invoice.validate_invoice_outstanding"
@@ -157,7 +157,14 @@ doc_events = {
         "before_save": "vaaman_hr.vaaman_hr.salary_slip_hooks.calculate_overtime_hours",
         "validate": "vaaman_hr.vaaman_hr.weekly_off.set_total_weekly_off",
         "validate": "vaaman_hr.vaaman_hr.weekly_off.before_save"
+    },
+    "App Push Notification": {
+        "on_submit": "vaaman_hr.api2.send_fcm_notification"
+    },
+    "App Announcement": {
+        "on_submit": "vaaman_hr.api2.send_fcm_notification"
     }
+
 
 }
 
@@ -197,12 +204,15 @@ doc_events = {
 # }
 
 scheduler_events = {
-        "daily": [
-            "vaaman_hr.late_entry_atten.process_attendance_policy"
+    "daily": [
+        "vaaman_hr.late_entry_atten.process_attendance_policy"
+    ],
+    "cron": {
+        "*/5 * * * *": [
+            "vaaman_hr.api2.check_and_send_shift_reminders"
         ]
     }
-
-
+}
 
 
 # Testing
