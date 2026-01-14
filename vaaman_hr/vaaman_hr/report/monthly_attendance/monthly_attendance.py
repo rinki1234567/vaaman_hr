@@ -73,18 +73,21 @@ def execute(filters: Filters | None = None) -> tuple:
 def get_message() -> str:
     message = ""
     colors = ["green", "red", "orange", "green", "#318AD8","#878787",
-        "#878787", "", ""]
+              "#878787", "", ""]
 
-    count = 0
-    for status, abbr in status_map.items():
+    for count, (status, abbr) in enumerate(status_map.items()):
         message += f"""
-            <span style='border-left: 2px solid {colors[count]}; padding-right: 12px; padding-left: 5px; margin-right: 3px;'>
+            <span style='border-left: 2px solid {colors[count]};
+                         padding-right: 12px;
+                         padding-left: 5px;
+                         margin-right: 3px;'>
                 {status} - {abbr}
             </span>
         """
-        count += 1
 
     return message
+
+
 
 
 def get_columns(filters: Filters) -> list[dict]:
@@ -164,7 +167,7 @@ def get_columns(filters: Filters) -> list[dict]:
             ]
         )
     else:
-        columns.append({"label": _("Shift"), "fieldname": "shift", "fieldtype": "Data", "width": 120})
+        # columns.append({"label": _("Shift"), "fieldname": "shift", "fieldtype": "Data", "width": 120})
         columns.extend(get_columns_for_days(filters))
         columns.extend([
             
@@ -604,17 +607,21 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 def get_attendance_status_for_detailed_view(
     employee: str, filters: Filters, employee_attendance: dict, holidays: list
 ) -> list[dict]:
-    """Returns list of shift-wise attendance status for employee with Totals"""
-    
+
     total_days = get_total_days_in_month(filters)
     attendance_values = []
 
     leave_summary = get_leave_summary(employee, filters)
     entry_exit = get_entry_exits_summary(employee, filters)
 
-   
-    #  Get leave type per day map
-   
+    # ---- Merge all shifts into one map ----
+    combined_status = {}
+    for _, status_dict in employee_attendance.items():
+        combined_status.update(status_dict)
+
+    row = {}
+
+    # ---- Leave type per day ----
     leave_details = {}
     attendance_records = frappe.db.get_all(
         "Attendance",
@@ -635,87 +642,68 @@ def get_attendance_status_for_detailed_view(
 
     for record in attendance_records:
         if record.leave_type:
-            day = record.attendance_date.day
-            leave_details[day] = leave_type_abbr.get(record.leave_type, "L")
+            leave_details[record.attendance_date.day] = leave_type_abbr.get(
+                record.leave_type, "L"
+            )
 
-   
-    #  Shift-wise processing
-   
-    for shift, status_dict in employee_attendance.items():
-        row = {"shift": shift}
+    total_p = total_a = total_l = 0.0
+    total_holidays = total_unmarked = 0
 
-        total_p = total_a = total_l = 0.0
-        total_holidays = total_unmarked = 0
+    for day in range(1, total_days + 1):
+        status = combined_status.get(day)
 
-        for day in range(1, total_days + 1):
-            status = status_dict.get(day)
+        if status is None and holidays:
+            status = get_holiday_status(day, holidays)
 
-            if status is None and holidays:
-                status = get_holiday_status(day, holidays)
+        if status == "On Leave":
+            abbr = leave_details.get(day, "L")
+        else:
+            abbr = status_map.get(status, "")
 
-          
-            if status == "On Leave":
-                abbr = leave_details.get(day, "L")
-            else:
-                abbr = status_map.get(status, "")
+        row[cstr(day)] = abbr
 
-            row[cstr(day)] = abbr
+        if abbr in ["P", "WFH"]:
+            total_p += 1
+        elif abbr == "A":
+            total_a += 1
+        elif abbr in ["CL", "SL", "PL", "LWP", "COM", "ML", "SPL", "L"]:
+            total_l += 1
+        elif abbr == "HD/P":
+            total_p += 0.5
+            total_a += 0.5
+            total_l += 0.5
+        elif abbr == "HD/A":
+            total_a += 0.5
+            total_p += 0.5
+            total_l += 0.5
+        elif abbr in ["H", "WO"]:
+            total_holidays += 1
+        elif not abbr:
+            total_unmarked += 1
 
-           
-            # Totals calculation
-            
-            if abbr in ["P", "WFH"]:
-                total_p += 1
-            elif abbr == "A":
-                total_a += 1
-            elif abbr in ["CL", "SL", "PL", "LWP", "COM", "ML", "SPL", "L"]:
-                total_l += 1
-            elif abbr == "HD/P":
-                total_p += 0.5
-                total_a += 0.5
-                total_l += 0.5
-            elif abbr == "HD/A":
-                total_a += 0.5
-                total_p += 0.5
-                total_l += 0.5
-            elif abbr in ["H", "WO"]:
-                total_holidays += 1
-            elif not abbr:
-                total_unmarked += 1
+    row.update({
+        "total_present": total_p,
+        "total_absent": total_a,
+        "total_leaves": total_l,
+        "total_holidays": total_holidays,
+        "unmarked_days": total_unmarked,
+    })
 
-        
-        # Totals columns
-        
-        row.update({
-            "total_present": total_p,
-            "total_absent": total_a,
-            "total_leave": total_l,
-            "total_holidays": total_holidays,
-            "unmarked_days": total_unmarked,
-        })
+    row.update({
+        "leave_without_pay": leave_summary.get("leave_without_pay", 0),
+        "privilege_leave": leave_summary.get("privilege_leave", 0),
+        "sick_leave": leave_summary.get("sick_leave", 0),
+        "casual_leave": leave_summary.get("casual_leave", 0),
+        "compensatory_off": leave_summary.get("compensatory_off", 0),
+    })
 
-       
-        # Leave type summary columns
-      
-        row.update({
-            "leave_without_pay": leave_summary.get("leave_without_pay", 0),
-            "privilege_leave": leave_summary.get("privilege_leave", 0),
-            "sick_leave": leave_summary.get("sick_leave", 0),
-            "casual_leave": leave_summary.get("casual_leave", 0),
-            "compensatory_off": leave_summary.get("compensatory_off", 0),
-        })
-        
-        # Late / Early summary
-        row.update({
-            "total_late_entries": entry_exit.get("total_late_entries", 0),
-            "total_early_exits": entry_exit.get("total_early_exits", 0),
-        })
+    row.update({
+        "total_late_entries": entry_exit.get("total_late_entries", 0),
+        "total_early_exits": entry_exit.get("total_early_exits", 0),
+    })
 
-        attendance_values.append(row)
-
+    attendance_values.append(row)
     return attendance_values
-
-
 
 def get_holiday_status(day: int, holidays: list) -> str:
     """Returns holiday status for a given day.
