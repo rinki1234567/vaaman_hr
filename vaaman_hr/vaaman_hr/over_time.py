@@ -10,31 +10,55 @@ logger = get_logger("compensatory_leave")
 @frappe.whitelist()
 def calculate_compensatory_leave(doc, method):
     try:
-        # Fetch compensatory off eligibility
         compoff = frappe.db.get_value("Employee", doc.employee, "compensatory_off")
         if not compoff:
             return
-        
+
         if doc.status in ["Present", "Weekly Off"] and doc.custom_over_time and compoff == 1:
-            overtime_hours = doc.custom_over_time / 8  # Assuming 8 hours = 1 day leave
+            overtime_hours = doc.custom_over_time / 8
             total_leave_days = overtime_hours
 
             company = frappe.db.get_value("Employee", doc.employee, "company")
             comp_leave_valid_from = add_days(doc.attendance_date, 1)
-            leave_period = get_leave_period(comp_leave_valid_from, comp_leave_valid_from, company)
+
+            leave_period = get_leave_period(
+                comp_leave_valid_from,
+                comp_leave_valid_from,
+                company
+            )
 
             if leave_period:
                 leave_allocation = get_existing_allocation_for_period(doc, leave_period)
                 if leave_allocation:
-                    update_leave_allocation(leave_allocation, total_leave_days, comp_leave_valid_from)
+                    update_leave_allocation(
+                        leave_allocation,
+                        total_leave_days,
+                        comp_leave_valid_from
+                    )
                 else:
-                    leave_allocation = create_leave_allocation(doc, leave_period, total_leave_days)
+                    leave_allocation = create_leave_allocation(
+                        doc,
+                        leave_period,
+                        total_leave_days
+                    )
+
                 doc.db_set("leave_allocation", leave_allocation.name)
+
             else:
                 handle_no_leave_period(comp_leave_valid_from)
-    except Exception as e:
-        logger.error(f"Error in calculate_compensatory_leave: {str(e)}")
-        frappe.throw(_("An error occurred while calculating compensatory leave. Please check the logs."))
+
+    except frappe.ValidationError:
+        # ✅ IMPORTANT: Let user-facing validation errors pass through
+        raise
+
+    except Exception:
+        logger.error(
+            frappe.get_traceback(),
+            "Compensatory Leave Calculation Error"
+        )
+        frappe.throw(
+            _("An unexpected error occurred while calculating compensatory leave.")
+        )
 
 def get_existing_allocation_for_period(doc, leave_period):
     leave_allocation = frappe.db.sql(
