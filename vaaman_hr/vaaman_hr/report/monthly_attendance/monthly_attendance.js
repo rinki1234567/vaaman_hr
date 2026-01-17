@@ -89,8 +89,18 @@ def get_date_condition(filters, table):
 
 def get_message() -> str:
     message = ""
-    colors = ["green", "red", "orange", "green", "#318AD8","#878787",
-              "#878787", "", ""]
+    colors = [
+    "green",
+    "red",
+    "orange",
+    "green",
+    "rgb(49,138,216)",
+    "rgb(135,135,135)",
+    "rgb(135,135,135)",
+    "",
+    "",
+]
+
 
     for count, (status, abbr) in enumerate(status_map.items()):
         message += f"""
