@@ -84,31 +84,28 @@ def get_date_condition(filters, table):
             (Extract("month", table.attendance_date) == filters.month) &
             (Extract("year", table.attendance_date) == filters.year)
         )
+
+
+
 def get_message() -> str:
     message = ""
-    colors = [
-        "green",
-        "red",
-        "orange",
-        "green",
-        "rgb(49,138,216)",
-        "rgb(135,135,135)",
-        "rgb(135,135,135)",
-        "",
-        "",
-    ]
+    colors = ["green", "red", "orange", "green", "#318AD8","#878787",
+              "#878787", "", ""]
 
     for count, (status, abbr) in enumerate(status_map.items()):
         message += f"""
-            <span style="border-left: 2px solid {colors[count]};
+            <span style='border-left: 2px solid {colors[count]};
                          padding-right: 12px;
                          padding-left: 5px;
-                         margin-right: 3px;">
+                         margin-right: 3px;'>
                 {status} - {abbr}
             </span>
         """
 
     return message
+
+
+
 
 def get_columns(filters: Filters) -> list[dict]:
     columns = []
