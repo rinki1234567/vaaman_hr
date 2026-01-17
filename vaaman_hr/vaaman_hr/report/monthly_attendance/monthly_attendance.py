@@ -41,8 +41,12 @@ leave_type_abbr = {
 def execute(filters: Filters | None = None) -> tuple:
     filters = frappe._dict(filters or {})
 
-    if not (filters.month and filters.year):
-        frappe.throw(_("Please select month and year."))
+    if filters.filter_based_on == "Month":
+        if not (filters.month and filters.year):
+            frappe.throw(_("Please select month and year."))
+    else:
+        if not (filters.start_date and filters.end_date):
+            frappe.throw(_("Please select start date and end date."))
 
     if not filters.company:
         frappe.throw(_("Please select company."))
@@ -69,26 +73,42 @@ def execute(filters: Filters | None = None) -> tuple:
 
     return columns, data, message, chart
 
-
+def get_date_condition(filters, table):
+    if filters.filter_based_on == "Date Range":
+        return table.attendance_date.between(
+            filters.start_date,
+            filters.end_date
+        )
+    else:
+        return (
+            (Extract("month", table.attendance_date) == filters.month) &
+            (Extract("year", table.attendance_date) == filters.year)
+        )
 def get_message() -> str:
     message = ""
-    colors = ["green", "red", "orange", "green", "#318AD8","#878787",
-              "#878787", "", ""]
+    colors = [
+        "green",
+        "red",
+        "orange",
+        "green",
+        "rgb(49,138,216)",
+        "rgb(135,135,135)",
+        "rgb(135,135,135)",
+        "",
+        "",
+    ]
 
     for count, (status, abbr) in enumerate(status_map.items()):
         message += f"""
-            <span style='border-left: 2px solid {colors[count]};
+            <span style="border-left: 2px solid {colors[count]};
                          padding-right: 12px;
                          padding-left: 5px;
-                         margin-right: 3px;'>
+                         margin-right: 3px;">
                 {status} - {abbr}
             </span>
         """
 
     return message
-
-
-
 
 def get_columns(filters: Filters) -> list[dict]:
     columns = []
@@ -369,10 +389,10 @@ def get_attendance_records(filters: Filters) -> list[dict]:
         .where(
             (Attendance.docstatus == 1)
             & (Attendance.company.isin(filters.companies))
-            & (Attendance.custom_branch == filters.branch)	
-            & (Extract("month", Attendance.attendance_date) == filters.month)
-            & (Extract("year", Attendance.attendance_date) == filters.year)
+            & (Attendance.custom_branch == filters.branch)
+            & get_date_condition(filters, Attendance)
         )
+
     )
 
     if filters.employee:
