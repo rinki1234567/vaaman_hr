@@ -145,11 +145,10 @@ override_doctype_class = {
 # 	}
 # }
 doc_events = {
-    "Attendance": {
+     "OverTime Import": {
         "on_submit": "vaaman_hr.vaaman_hr.over_time.calculate_compensatory_leave",
         "on_cancel": "vaaman_hr.vaaman_hr.over_time.cancel_compensatory_leave"
     },
-    
     
     "Payment Request": {
         "on_submit": "vaaman_hr.purchase_invoice.validate_invoice_outstanding"
