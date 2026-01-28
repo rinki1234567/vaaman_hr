@@ -139,6 +139,12 @@ def get_columns(filters: Filters) -> list[dict]:
                     "width": 120,
                 },
                 {
+                    "label": _("Total Weekly Off"),
+                    "fieldname": "total_weekly_off",
+                    "fieldtype": "Float",
+                    "width": 120,
+                },
+                {
                     "label": _("Unmarked Days"),
                     "fieldname": "unmarked_days",
                     "fieldtype": "Float",
@@ -164,7 +170,7 @@ def get_columns(filters: Filters) -> list[dict]:
             ]
         )
     else:
-        columns.append({"label": _("Shift"), "fieldname": "shift", "fieldtype": "Data", "width": 120})
+        # columns.append({"label": _("Shift"), "fieldname": "shift", "fieldtype": "Data", "width": 120})
         columns.extend(get_columns_for_days(filters))
         columns.extend([
             
@@ -188,6 +194,12 @@ def get_columns(filters: Filters) -> list[dict]:
         {
         "label": _("Total Holidays"),
         "fieldname": "total_holidays",
+        "fieldtype": "Float",
+        "width": 120
+        },
+        {
+        "label": _("Total Weekly Off"),
+        "fieldname": "total_weekly_off",
         "fieldtype": "Float",
         "width": 120
         },
@@ -526,15 +538,17 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
         return {}
 
     total_days = get_total_days_in_month(filters)
-    total_holidays = total_unmarked_days = 0
+    total_holidays = total_unmarked_days = total_weekly_off = 0
 
     for day in range(1, total_days + 1):
         if day in attendance_days:
             continue
 
         status = get_holiday_status(day, holidays)
-        if status in ["Weekly Off", "Holiday"]:
+        if status =="Holiday":
             total_holidays += 1
+        elif status == "Weekly Off":
+            total_weekly_off += 1
         elif not status:
             total_unmarked_days += 1
 
@@ -543,6 +557,8 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
         "total_leaves": summary.total_leaves + summary.total_half_days,
         "total_absent": summary.total_absent,
         "total_holidays": total_holidays,
+        "total_weekly_off": total_weekly_off,
+        
         "unmarked_days": total_unmarked_days,
     }
 
@@ -642,10 +658,11 @@ def get_attendance_status_for_detailed_view(
     #  Shift-wise processing
    
     for shift, status_dict in employee_attendance.items():
-        row = {"shift": shift}
+        # row = {"shift": shift}
+        row = {}
 
         total_p = total_a = total_l = 0.0
-        total_holidays = total_unmarked = 0
+        total_holidays = total_unmarked = total_weekly_off = 0
 
         for day in range(1, total_days + 1):
             status = status_dict.get(day)
@@ -678,8 +695,10 @@ def get_attendance_status_for_detailed_view(
                 total_a += 0.5
                 total_p += 0.5
                 total_l += 0.5
-            elif abbr in ["H", "WO"]:
+            elif abbr == "H":
                 total_holidays += 1
+            elif abbr == "WO":
+                total_weekly_off += 1
             elif not abbr:
                 total_unmarked += 1
 
@@ -692,6 +711,7 @@ def get_attendance_status_for_detailed_view(
             "total_leave": total_l,
             "total_holidays": total_holidays,
             "unmarked_days": total_unmarked,
+            "total_weekly_off":total_weekly_off,
         })
 
        
