@@ -1029,12 +1029,12 @@ def get_shift_time_range(employee_id, date_str):
     end_dt = company_tz.localize(end_dt_naive)
 
     # Handle Night Shift (e.g., 10 PM to 6 AM)
-    if shift.is_night_shift or end_dt < start_dt:
-        next_date_obj = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1))
-        next_date_str = next_date_obj.strftime('%Y-%m-%d')
+    # if shift.is_night_shift or end_dt < start_dt:
+    #     next_date_obj = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1))
+    #     next_date_str = next_date_obj.strftime('%Y-%m-%d')
         
-        end_dt_naive = datetime.strptime(f"{next_date_str} {end_time_str}", "%Y-%m-%d %H:%M:%S")
-        end_dt = company_tz.localize(end_dt_naive)
+    #     end_dt_naive = datetime.strptime(f"{next_date_str} {end_time_str}", "%Y-%m-%d %H:%M:%S")
+    #     end_dt = company_tz.localize(end_dt_naive)
     
     return (start_dt, end_dt)
 
