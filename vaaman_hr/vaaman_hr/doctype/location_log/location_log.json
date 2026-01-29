@@ -9,7 +9,8 @@
   "timestamp",
   "latitude",
   "longitude",
-  "branch_unit"
+  "branch_unit",
+  "map"
  ],
  "fields": [
   {
@@ -40,12 +41,17 @@
    "fieldtype": "Link",
    "label": "Branch Unit",
    "options": "Branch Unit"
+  },
+  {
+   "fieldname": "map",
+   "fieldtype": "Geolocation",
+   "label": "Map"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-25 13:24:08.785820",
+ "modified": "2025-11-29 11:38:33.785987",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Location Log",
