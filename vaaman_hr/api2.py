@@ -452,7 +452,7 @@ def get_pending_approvals():
         
         expense_approvals = frappe.get_all(
             "Expense Claim",
-            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "rejection_reason"],
+            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "custom_rejection_reason"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Draft", "Unpaid", "Rejected", "Paid"]]
@@ -531,7 +531,7 @@ def update_approval_status(doctype, docname, action, rejection_reason=None):
             doc.approval_status = action
 
             if action == 'Rejected':
-                doc.rejection_reason = rejection_reason
+                doc.custom_rejection_reason = rejection_reason
                 
             doc.save(ignore_permissions=True)
             if action in ['Approved', 'Rejected']:
