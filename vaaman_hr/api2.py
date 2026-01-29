@@ -511,11 +511,11 @@ def update_approval_status(doctype, docname, action, rejection_reason=None):
 
         elif doctype == "Attendance Request":
             if action == 'Approved':
-                doc.attendance_request_status = 'Approved'
+                doc.custom_attendance_request_status = 'Approved'
                 doc.save(ignore_permissions=True)
                 doc.submit()
             elif action == 'Rejected':
-                doc.attendance_request_status = 'Rejected'
+                doc.custom_attendance_request_status = 'Rejected'
                 doc.save(ignore_permissions=True) 
                 
         elif doctype == "Shift Request":
