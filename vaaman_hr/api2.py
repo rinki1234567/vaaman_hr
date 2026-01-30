@@ -810,6 +810,7 @@ def calculate_daily_worked_hours(logs):
             
     return flt(total_seconds / 3600, 2)
 
+
 @frappe.whitelist()
 def get_employee_attendance_data(employee_id, year, month):
     try:
@@ -822,9 +823,14 @@ def get_employee_attendance_data(employee_id, year, month):
 
     attendance_records = frappe.get_all(
         "Attendance",
-        filters={"employee": employee_id, "attendance_date": ["between", (start_date, end_date)]},
+        filters={
+            "employee": employee_id, 
+            "attendance_date": ["between", (start_date, end_date)],
+            "docstatus": 1  
+        },
         fields=["attendance_date", "status"]
     )
+    
     attendance_status_map = {
         d.attendance_date.strftime("%Y-%m-%d"): d.status for d in attendance_records
     }
@@ -911,7 +917,6 @@ def get_employee_attendance_data(employee_id, year, month):
                 weekly_off_days += 1
 
     for date_str, data in processed_data.items():
-        # MODIFIED: Added "Holiday" to list so logs are processed even for holidays
         if data["status"] in ["Present", "Absent", "Half Day", "Holiday"] and date_str in daily_logs:
             logs = daily_logs.get(date_str, [])
             first_checkin = next((log for log in logs if log['event'] == 'IN'), None)
@@ -934,6 +939,7 @@ def get_employee_attendance_data(employee_id, year, month):
             "weekly_off_days": weekly_off_days
         }
     }
+
 
 @frappe.whitelist()
 def log_employee_location_batch(employee, locations, branch_unit=None):
