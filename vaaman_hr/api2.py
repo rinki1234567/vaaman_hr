@@ -306,7 +306,7 @@ def get_active_announcements():
         
         for ann in announcements:
             if ann.image:
-                ann.image = f"https://demo.octavision.in{ann.image}"
+                ann.image = f"https://vidhi.vaaman.in{ann.image}"
 
         return announcements
 
@@ -821,6 +821,7 @@ def get_employee_attendance_data(employee_id, year, month):
     except (ValueError, TypeError):
         frappe.throw("Year and month must be valid integers.")
 
+    # UPDATED: Added docstatus: 1 to filter out draft (Saved) records
     attendance_records = frappe.get_all(
         "Attendance",
         filters={
