@@ -810,7 +810,6 @@ def calculate_daily_worked_hours(logs):
             
     return flt(total_seconds / 3600, 2)
 
-
 @frappe.whitelist()
 def get_employee_attendance_data(employee_id, year, month):
     try:
@@ -892,8 +891,6 @@ def get_employee_attendance_data(employee_id, year, month):
             status = "Weekly Off"
         elif date_str in holiday_name_map:
             status = "Holiday"
-        # elif date_str in daily_logs and daily_logs[date_str]:
-        #     status = "Checked In"
 
         if status:
             if status == "Holiday":
@@ -916,9 +913,17 @@ def get_employee_attendance_data(employee_id, year, month):
                 on_leave_days += 1
             elif status == "Weekly Off":
                 weekly_off_days += 1
+    
+    for date_str in daily_logs:
+        if date_str not in processed_data:
+            processed_data[date_str] = {
+                "status": None, 
+                "logs": []
+            }
+
 
     for date_str, data in processed_data.items():
-        if data["status"] in ["Present", "Absent", "Half Day", "Holiday"] and date_str in daily_logs:
+        if date_str in daily_logs:
             logs = daily_logs.get(date_str, [])
             first_checkin = next((log for log in logs if log['event'] == 'IN'), None)
             last_checkout = next((log for log in reversed(logs) if log['event'] == 'OUT'), None)
