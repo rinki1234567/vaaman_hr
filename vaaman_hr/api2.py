@@ -892,8 +892,8 @@ def get_employee_attendance_data(employee_id, year, month):
             status = "Weekly Off"
         elif date_str in holiday_name_map:
             status = "Holiday"
-        elif date_str in daily_logs and daily_logs[date_str]:
-            status = "Present"
+        # elif date_str in daily_logs and daily_logs[date_str]:
+        #     status = "Checked In"
 
         if status:
             if status == "Holiday":
