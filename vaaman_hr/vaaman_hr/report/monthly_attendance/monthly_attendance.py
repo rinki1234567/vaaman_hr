@@ -144,6 +144,7 @@ def get_columns(filters: Filters) -> list[dict]:
                     "fieldtype": "Float",
                     "width": 120,
                 },
+                {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
                 {
                     "label": _("Unmarked Days"),
                     "fieldname": "unmarked_days",
@@ -251,6 +252,7 @@ def get_columns(filters: Filters) -> list[dict]:
         "fieldtype": "Int",
         "width": 160
         },
+        {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150}
         ])
     return columns
 
@@ -505,6 +507,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
             row.update(attendance)
             row.update(leave_summary)
             row.update(entry_exits_summary)
+            row["total_overtime"] = get_total_overtime(employee, filters)
 
             records.append(row)
         else:
@@ -708,7 +711,7 @@ def get_attendance_status_for_detailed_view(
         row.update({
             "total_present": total_p,
             "total_absent": total_a,
-            "total_leave": total_l,
+            "total_leaves": total_l,
             "total_holidays": total_holidays,
             "unmarked_days": total_unmarked,
             "total_weekly_off":total_weekly_off,
@@ -730,6 +733,8 @@ def get_attendance_status_for_detailed_view(
             "total_late_entries": entry_exit.get("total_late_entries", 0),
             "total_early_exits": entry_exit.get("total_early_exits", 0),
         })
+        # Total Overtime
+        row["total_overtime"] = get_total_overtime(employee, filters)
 
         attendance_values.append(row)
 
@@ -877,3 +882,20 @@ def get_chart_data(attendance_map: dict, filters: Filters) -> dict:
         "type": "line",
         "colors": ["red", "green", "blue"],
     }
+
+
+def get_total_overtime(employee: str, filters: Filters) -> float:
+    from_date = f"{filters.year}-{filters.month}-01"
+    to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
+
+    total = frappe.db.sql("""
+        SELECT SUM(ot.over_time)
+        FROM `tabOvertime Import Item` ot
+        INNER JOIN `tabOverTime Import` oi
+            ON oi.name = ot.parent
+        WHERE ot.employee = %s
+          AND oi.docstatus = 1
+          AND ot.attendance_date BETWEEN %s AND %s
+    """, (employee, from_date, to_date))[0][0]
+
+    return total or 0

@@ -24,7 +24,7 @@ frappe.query_reports["Overtime Report"] = {
             "fieldname": "month",
             "label": __("Month"),
             "fieldtype": "Select",
-            "options": [
+            "options": [" ",
                 "January", "February", "March", "April", 
                 "May", "June", "July", "August",
                 "September", "October", "November", "December"
