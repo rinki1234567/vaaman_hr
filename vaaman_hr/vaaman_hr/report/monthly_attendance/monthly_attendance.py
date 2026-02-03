@@ -41,12 +41,8 @@ leave_type_abbr = {
 def execute(filters: Filters | None = None) -> tuple:
     filters = frappe._dict(filters or {})
 
-    if filters.filter_based_on == "Month":
-        if not (filters.month and filters.year):
-            frappe.throw(_("Please select month and year."))
-    else:
-        if not (filters.start_date and filters.end_date):
-            frappe.throw(_("Please select start date and end date."))
+    if not (filters.month and filters.year):
+        frappe.throw(_("Please select month and year."))
 
     if not filters.company:
         frappe.throw(_("Please select company."))
@@ -73,42 +69,23 @@ def execute(filters: Filters | None = None) -> tuple:
 
     return columns, data, message, chart
 
-def get_date_condition(filters, table):
-    if filters.filter_based_on == "Date Range":
-        return table.attendance_date.between(
-            filters.start_date,
-            filters.end_date
-        )
-    else:
-        return (
-            (Extract("month", table.attendance_date) == filters.month) &
-            (Extract("year", table.attendance_date) == filters.year)
-        )
+
 def get_message() -> str:
     message = ""
-    colors = [
-        "green",
-        "red",
-        "orange",
-        "green",
-        "rgb(49,138,216)",
-        "rgb(135,135,135)",
-        "rgb(135,135,135)",
-        "",
-        "",
-    ]
+    colors = ["green", "red", "orange", "green", "#318AD8","#878787",
+        "#878787", "", ""]
 
-    for count, (status, abbr) in enumerate(status_map.items()):
+    count = 0
+    for status, abbr in status_map.items():
         message += f"""
-            <span style="border-left: 2px solid {colors[count]};
-                         padding-right: 12px;
-                         padding-left: 5px;
-                         margin-right: 3px;">
+            <span style='border-left: 2px solid {colors[count]}; padding-right: 12px; padding-left: 5px; margin-right: 3px;'>
                 {status} - {abbr}
             </span>
         """
+        count += 1
 
     return message
+
 
 def get_columns(filters: Filters) -> list[dict]:
     columns = []
@@ -403,10 +380,10 @@ def get_attendance_records(filters: Filters) -> list[dict]:
         .where(
             (Attendance.docstatus == 1)
             & (Attendance.company.isin(filters.companies))
-            & (Attendance.custom_branch == filters.branch)
-            & get_date_condition(filters, Attendance)
+            & (Attendance.custom_branch == filters.branch)	
+            & (Extract("month", Attendance.attendance_date) == filters.month)
+            & (Extract("year", Attendance.attendance_date) == filters.year)
         )
-
     )
 
     if filters.employee:
@@ -646,21 +623,17 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 def get_attendance_status_for_detailed_view(
     employee: str, filters: Filters, employee_attendance: dict, holidays: list
 ) -> list[dict]:
-
+    """Returns list of shift-wise attendance status for employee with Totals"""
+    
     total_days = get_total_days_in_month(filters)
     attendance_values = []
 
     leave_summary = get_leave_summary(employee, filters)
     entry_exit = get_entry_exits_summary(employee, filters)
 
-    # ---- Merge all shifts into one map ----
-    combined_status = {}
-    for _, status_dict in employee_attendance.items():
-        combined_status.update(status_dict)
-
-    row = {}
-
-    # ---- Leave type per day ----
+   
+    #  Get leave type per day map
+   
     leave_details = {}
     attendance_records = frappe.db.get_all(
         "Attendance",
@@ -681,68 +654,93 @@ def get_attendance_status_for_detailed_view(
 
     for record in attendance_records:
         if record.leave_type:
-            leave_details[record.attendance_date.day] = leave_type_abbr.get(
-                record.leave_type, "L"
-            )
+            day = record.attendance_date.day
+            leave_details[day] = leave_type_abbr.get(record.leave_type, "L")
 
-    total_p = total_a = total_l = 0.0
-    total_holidays = total_unmarked = 0
+   
+    #  Shift-wise processing
+   
+    for shift, status_dict in employee_attendance.items():
+        # row = {"shift": shift}
+        row = {}
 
-    for day in range(1, total_days + 1):
-        status = combined_status.get(day)
+        total_p = total_a = total_l = 0.0
+        total_holidays = total_unmarked = total_weekly_off = 0
 
-        if status is None and holidays:
-            status = get_holiday_status(day, holidays)
+        for day in range(1, total_days + 1):
+            status = status_dict.get(day)
 
-        if status == "On Leave":
-            abbr = leave_details.get(day, "L")
-        else:
-            abbr = status_map.get(status, "")
+            if status is None and holidays:
+                status = get_holiday_status(day, holidays)
 
-        row[cstr(day)] = abbr
+          
+            if status == "On Leave":
+                abbr = leave_details.get(day, "L")
+            else:
+                abbr = status_map.get(status, "")
 
-        if abbr in ["P", "WFH"]:
-            total_p += 1
-        elif abbr == "A":
-            total_a += 1
-        elif abbr in ["CL", "SL", "PL", "LWP", "COM", "ML", "SPL", "L"]:
-            total_l += 1
-        elif abbr == "HD/P":
-            total_p += 0.5
-            total_a += 0.5
-            total_l += 0.5
-        elif abbr == "HD/A":
-            total_a += 0.5
-            total_p += 0.5
-            total_l += 0.5
-        elif abbr in ["H", "WO"]:
-            total_holidays += 1
-        elif not abbr:
-            total_unmarked += 1
+            row[cstr(day)] = abbr
 
-    row.update({
-        "total_present": total_p,
-        "total_absent": total_a,
-        "total_leaves": total_l,
-        "total_holidays": total_holidays,
-        "unmarked_days": total_unmarked,
-    })
+           
+            # Totals calculation
+            
+            if abbr in ["P", "WFH"]:
+                total_p += 1
+            elif abbr == "A":
+                total_a += 1
+            elif abbr in ["CL", "SL", "PL", "LWP", "COM", "ML", "SPL", "L"]:
+                total_l += 1
+            elif abbr == "HD/P":
+                total_p += 0.5
+                total_a += 0.5
+                total_l += 0.5
+            elif abbr == "HD/A":
+                total_a += 0.5
+                total_p += 0.5
+                total_l += 0.5
+            elif abbr == "H":
+                total_holidays += 1
+            elif abbr == "WO":
+                total_weekly_off += 1
+            elif not abbr:
+                total_unmarked += 1
 
-    row.update({
-        "leave_without_pay": leave_summary.get("leave_without_pay", 0),
-        "privilege_leave": leave_summary.get("privilege_leave", 0),
-        "sick_leave": leave_summary.get("sick_leave", 0),
-        "casual_leave": leave_summary.get("casual_leave", 0),
-        "compensatory_off": leave_summary.get("compensatory_off", 0),
-    })
+        
+        # Totals columns
+        
+        row.update({
+            "total_present": total_p,
+            "total_absent": total_a,
+            "total_leaves": total_l,
+            "total_holidays": total_holidays,
+            "unmarked_days": total_unmarked,
+            "total_weekly_off":total_weekly_off,
+        })
 
-    row.update({
-        "total_late_entries": entry_exit.get("total_late_entries", 0),
-        "total_early_exits": entry_exit.get("total_early_exits", 0),
-    })
+       
+        # Leave type summary columns
+      
+        row.update({
+            "leave_without_pay": leave_summary.get("leave_without_pay", 0),
+            "privilege_leave": leave_summary.get("privilege_leave", 0),
+            "sick_leave": leave_summary.get("sick_leave", 0),
+            "casual_leave": leave_summary.get("casual_leave", 0),
+            "compensatory_off": leave_summary.get("compensatory_off", 0),
+        })
+        
+        # Late / Early summary
+        row.update({
+            "total_late_entries": entry_exit.get("total_late_entries", 0),
+            "total_early_exits": entry_exit.get("total_early_exits", 0),
+        })
+        # Total Overtime
+        row["total_overtime"] = get_total_overtime(employee, filters)
 
-    attendance_values.append(row)
+        attendance_values.append(row)
+
     return attendance_values
+
+
 
 def get_holiday_status(day: int, holidays: list) -> str:
     """Returns holiday status for a given day.
@@ -884,3 +882,20 @@ def get_chart_data(attendance_map: dict, filters: Filters) -> dict:
         "type": "line",
         "colors": ["red", "green", "blue"],
     }
+
+
+def get_total_overtime(employee: str, filters: Filters) -> float:
+    from_date = f"{filters.year}-{filters.month}-01"
+    to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
+
+    total = frappe.db.sql("""
+        SELECT SUM(ot.over_time)
+        FROM `tabOvertime Import Item` ot
+        INNER JOIN `tabOverTime Import` oi
+            ON oi.name = ot.parent
+        WHERE ot.employee = %s
+          AND oi.docstatus = 1
+          AND ot.attendance_date BETWEEN %s AND %s
+    """, (employee, from_date, to_date))[0][0]
+
+    return total or 0
