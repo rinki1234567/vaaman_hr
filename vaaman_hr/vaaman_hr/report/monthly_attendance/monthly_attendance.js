@@ -186,5 +186,3 @@ function validate_date_range(report) {
 	}
 	report.refresh();
 }
-
-

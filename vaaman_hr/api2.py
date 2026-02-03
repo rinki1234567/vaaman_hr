@@ -12,7 +12,51 @@ from frappe.utils import (
     get_first_day, get_last_day, nowdate, get_datetime, 
     format_time, add_days, time_diff_in_hours, get_system_timezone
 )
+
+
 from frappe.model.workflow import apply_workflow
+from frappe import _
+
+
+@frappe.whitelist()
+def get_current_shift_summary(employee):
+    if not employee:
+        frappe.throw("Employee ID is required.")
+
+    today_str = get_local_now().strftime("%Y-%m-%d")
+    
+    # Priority 1: Active Shift Assignment
+    shift_type_name = frappe.db.get_value(
+        "Shift Assignment",
+        {
+            "employee": employee,
+            "start_date": ("<=", today_str),
+            "end_date": (">=", today_str),
+            "status": "Active",
+            "docstatus": 1
+        },
+        "shift_type"
+    )
+
+    # Priority 2: Employee Default Shift
+    if not shift_type_name:
+        shift_type_name = frappe.db.get_value("Employee", employee, "default_shift")
+
+    if not shift_type_name:
+        return {"status": "none"}
+
+    shift = frappe.db.get_value("Shift Type", shift_type_name, ["name", "start_time", "end_time"], as_dict=True)
+    
+    if not shift:
+        return {"status": "none"}
+
+    return {
+        "status": "success",
+        "shift_name": shift.name,
+        # Format changed from "HH:mm:ss" to "hh:mm A" (e.g., 09:00 AM)
+        "start_time": format_time(shift.start_time, "hh:mm A") if shift.start_time else "--:--",
+        "end_time": format_time(shift.end_time, "hh:mm A") if shift.end_time else "--:--"
+    }
 
 def get_local_now():
     """
@@ -72,34 +116,19 @@ def get_shift_end_datetime(employee, checkin_time):
 
 def determine_status(employee, last_checkin):
     """
-    Decides if user is effectively IN or OUT based on:
-    1. Manual Punch History
-    2. Shift Timings (Local Time)
-    3. Geofence Logs (stored in Employee Checkin with flag 0)
+    Decides status based strictly on the last valid log.
+    NO STALE CHECKS HERE.
     """
-    # If no previous record or last was OUT, they are definitely OUT.
-    if not last_checkin:
-        return "OUT"
-    if last_checkin.log_type == "OUT":
+
+    if not last_checkin or last_checkin.log_type == "OUT":
         return "OUT"
 
-    # --- INTELLIGENT CHECK ---
-
-    # 1. Get Shift End Time
     shift_end_dt = get_shift_end_datetime(employee, last_checkin.time)
-    
     current_time = get_local_now()
 
-    # Fallback: If no shift found at all, force checkout after 20 hours
-    if not shift_end_dt:
-        STALE_THRESHOLD = 20
-        if time_diff_in_hours(current_time, last_checkin.time) > STALE_THRESHOLD:
-            return "OUT"
+    if shift_end_dt and current_time < shift_end_dt:
         return "IN"
 
-    # 2. If Shift is STILL RUNNING -> User is IN
-    if current_time < shift_end_dt:
-        return "IN"
     last_geo_log = frappe.db.get_value(
         "Employee Checkin", 
         {
@@ -111,11 +140,12 @@ def determine_status(employee, last_checkin):
         order_by="time desc"
     )
 
-    # If the last known geofence movement was 'OUT', then they are OUT.
     if last_geo_log == "OUT":
         return "OUT"
 
     return "IN"
+
+
 
 @frappe.whitelist()
 def get_employee_checkin_status(employee):
@@ -254,10 +284,6 @@ def get_vaamanhr_settings():
     return response
 
 
-
-
-    
-
 @frappe.whitelist()
 def get_active_announcements():
     today = nowdate()
@@ -280,7 +306,7 @@ def get_active_announcements():
         
         for ann in announcements:
             if ann.image:
-                ann.image = f"https://demo.octavision.in{ann.image}"
+                ann.image = f"https://vidhi.vaaman.in{ann.image}"
 
         return announcements
 
@@ -396,7 +422,7 @@ def get_pending_approvals():
 
         leave_requests = frappe.get_all(
             "Leave Application",
-            fields=["name", "leave_type", "from_date", "to_date", "status", "employee", "employee_name", "total_leave_days", "creation"],
+            fields=["name", "leave_type", "from_date", "to_date", "status", "employee", "employee_name", "total_leave_days", "creation","description"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Open", "Approved", "Rejected", "Cancelled"]]
@@ -406,7 +432,7 @@ def get_pending_approvals():
 
         attendance_requests = frappe.get_all(
             "Attendance Request",
-            fields=["name", "reason", "from_date", "to_date", "explanation", "shift", "docstatus", "employee", "employee_name", "attendance_request_status", "creation"],
+            fields=["name", "reason", "from_date", "to_date", "explanation", "shift", "docstatus", "employee", "employee_name", "custom_attendance_request_status", "creation"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["docstatus", "in", [0, 1, 2]]
@@ -426,7 +452,7 @@ def get_pending_approvals():
         
         expense_approvals = frappe.get_all(
             "Expense Claim",
-            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation"],
+            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "custom_rejection_reason"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Draft", "Unpaid", "Rejected", "Paid"]]
@@ -485,11 +511,11 @@ def update_approval_status(doctype, docname, action, rejection_reason=None):
 
         elif doctype == "Attendance Request":
             if action == 'Approved':
-                doc.attendance_request_status = 'Approved'
+                doc.custom_attendance_request_status = 'Approved'
                 doc.save(ignore_permissions=True)
                 doc.submit()
             elif action == 'Rejected':
-                doc.attendance_request_status = 'Rejected'
+                doc.custom_attendance_request_status = 'Rejected'
                 doc.save(ignore_permissions=True) 
                 
         elif doctype == "Shift Request":
@@ -499,7 +525,14 @@ def update_approval_status(doctype, docname, action, rejection_reason=None):
                 doc.submit()
                 
         elif doctype == "Expense Claim":
+            if action == 'Rejected' and not rejection_reason:
+                frappe.throw(_("Rejection reason is mandatory"))
+
             doc.approval_status = action
+
+            if action == 'Rejected':
+                doc.custom_rejection_reason = rejection_reason
+                
             doc.save(ignore_permissions=True)
             if action in ['Approved', 'Rejected']:
                 doc.submit()
@@ -759,13 +792,12 @@ def update_employee_data(employee, embeddings, latitude=None, longitude=None, ra
         frappe.log_error(frappe.get_traceback())
         frappe.throw(str(e))
 
-
-
 def calculate_daily_worked_hours(logs):
     total_seconds = 0
     in_time = None
 
     for log in logs:
+        # Assuming log['time'] is in "%I:%M %p" format like "09:30 AM"
         event_time = datetime.strptime(log['time'], "%I:%M %p").time()
         if log['event'] == 'IN' and not in_time:
             in_time = event_time
@@ -788,11 +820,17 @@ def get_employee_attendance_data(employee_id, year, month):
     except (ValueError, TypeError):
         frappe.throw("Year and month must be valid integers.")
 
+    # UPDATED: Added docstatus: 1 to filter out draft (Saved) records
     attendance_records = frappe.get_all(
         "Attendance",
-        filters={"employee": employee_id, "attendance_date": ["between", (start_date, end_date)]},
+        filters={
+            "employee": employee_id, 
+            "attendance_date": ["between", (start_date, end_date)],
+            "docstatus": 1  
+        },
         fields=["attendance_date", "status"]
     )
+    
     attendance_status_map = {
         d.attendance_date.strftime("%Y-%m-%d"): d.status for d in attendance_records
     }
@@ -853,8 +891,6 @@ def get_employee_attendance_data(employee_id, year, month):
             status = "Weekly Off"
         elif date_str in holiday_name_map:
             status = "Holiday"
-        elif date_str in daily_logs and daily_logs[date_str]:
-            status = "Present"
 
         if status:
             if status == "Holiday":
@@ -877,9 +913,17 @@ def get_employee_attendance_data(employee_id, year, month):
                 on_leave_days += 1
             elif status == "Weekly Off":
                 weekly_off_days += 1
+    
+    for date_str in daily_logs:
+        if date_str not in processed_data:
+            processed_data[date_str] = {
+                "status": None, 
+                "logs": []
+            }
+
 
     for date_str, data in processed_data.items():
-        if data["status"] in ["Present", "Absent", "Half Day"] and date_str in daily_logs:
+        if date_str in daily_logs:
             logs = daily_logs.get(date_str, [])
             first_checkin = next((log for log in logs if log['event'] == 'IN'), None)
             last_checkout = next((log for log in reversed(logs) if log['event'] == 'OUT'), None)
@@ -901,13 +945,6 @@ def get_employee_attendance_data(employee_id, year, month):
             "weekly_off_days": weekly_off_days
         }
     }
-
-
-
-
-
-
-
 
 
 @frappe.whitelist()
@@ -1004,26 +1041,14 @@ def get_shift_time_range(employee_id, date_str):
     end_dt = company_tz.localize(end_dt_naive)
 
     # Handle Night Shift (e.g., 10 PM to 6 AM)
-    if shift.is_night_shift or end_dt < start_dt:
-        next_date_obj = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1))
-        next_date_str = next_date_obj.strftime('%Y-%m-%d')
+    # if shift.is_night_shift or end_dt < start_dt:
+    #     next_date_obj = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1))
+    #     next_date_str = next_date_obj.strftime('%Y-%m-%d')
         
-        end_dt_naive = datetime.strptime(f"{next_date_str} {end_time_str}", "%Y-%m-%d %H:%M:%S")
-        end_dt = company_tz.localize(end_dt_naive)
+    #     end_dt_naive = datetime.strptime(f"{next_date_str} {end_time_str}", "%Y-%m-%d %H:%M:%S")
+    #     end_dt = company_tz.localize(end_dt_naive)
     
     return (start_dt, end_dt)
-
-
-
-
-
-
-
-
-
-
-
-
 
 @frappe.whitelist()
 def get_salary_slip_details(employee, month, year):
@@ -1222,6 +1247,33 @@ def get_filtered_historical_paths(date, department=None, branch=None, employee_i
 
 
 
+
+
+
+
+
+
+
+
+
+def get_google_access_token():
+    key_file_path = frappe.get_site_path("private", "files", "firebase-service-account.json")
+    
+    if not os.path.exists(key_file_path):
+        frappe.log_error("Firebase Service Account JSON file not found.")
+        return None
+
+    creds = service_account.Credentials.from_service_account_file(
+        key_file_path,
+        scopes=['https://www.googleapis.com/auth/cloud-platform']
+    )
+
+    transport_request = Request()
+    creds.refresh(transport_request)
+    return creds.token
+
+
+
 @frappe.whitelist()
 def save_fcm_token(employee, fcm_token):
     try:
@@ -1237,7 +1289,6 @@ def save_fcm_token(employee, fcm_token):
             helper_name = helper_doc.name
 
         frappe.db.set_value("Employee Helper", helper_name, "fcm_token", fcm_token)
-        
         frappe.db.commit()
         
         return {"status": "success", "message": "Token saved"}
@@ -1247,9 +1298,6 @@ def save_fcm_token(employee, fcm_token):
         frappe.log_error(f"Failed to save FCM token for {employee}: {e}")
         frappe.local.response.http_status_code = 500
         return {"status": "error", "message": str(e)}
-
-
-
 
 @frappe.whitelist()
 def get_notifications_for_employee(employee_id):
@@ -1296,43 +1344,24 @@ def get_notifications_for_employee(employee_id):
             combined_notifications[ann.name] = ann
 
         final_list = list(combined_notifications.values())
-
         final_list.sort(key=lambda x: x.creation, reverse=True)
 
         return final_list[:30]
 
     except Exception as e:
-        frappe.log_error(
-            f"Failed to get notifications for {employee_id}: {e}",
-            "Get Notifications Error"
-        )
+        frappe.log_error(f"Failed to get notifications for {employee_id}: {e}", "Get Notifications Error")
         frappe.throw(f"An error occurred while fetching notifications: {str(e)}")
 
 
-
-
-def get_google_access_token():
-    key_file_path = frappe.get_site_path("private", "files", "firebase-service-account.json")
-    
-    if not os.path.exists(key_file_path):
-        frappe.log_error("Firebase Service Account JSON file not found.")
-        return None
-
-    creds = service_account.Credentials.from_service_account_file(
-        key_file_path,
-        scopes=['https://www.googleapis.com/auth/cloud-platform']
-    )
-
-    transport_request = Request()
-    creds.refresh(transport_request)
-    return creds.token
-
 @frappe.whitelist()
-def send_fcm_notification(doc, method):
+def send_fcm_notification(doc, method=None):
+    # 1. Get Access Token (Original Function)
     access_token = get_google_access_token()
     if not access_token:
-        frappe.throw("Could not get Google Access Token. Check Error Log for issues.")
+        frappe.log_error("FCM Token Error", "Could not get Google Access Token")
+        return
 
+    # 2. Get Data
     title = getattr(doc, "title", "New Notification")
     content = getattr(doc, "content", "You have a new update")
 
@@ -1347,6 +1376,7 @@ def send_fcm_notification(doc, method):
     target = None
     token = None
 
+    # 3. Determine Target
     if doc.doctype == "App Announcement":
         target = {"topic": "all_users"}
     elif doc.doctype == "App Push Notification":
@@ -1354,29 +1384,26 @@ def send_fcm_notification(doc, method):
             target = {"topic": "all_users"}
         elif getattr(doc, "send_to_employee", None):
             employee_id = doc.send_to_employee
-
             helper_name = frappe.db.get_value("Employee Helper", {"employee": employee_id}, "name")
             if helper_name:
                 token = frappe.db.get_value("Employee Helper", helper_name, "fcm_token")
                 
             if not token:
-                frappe.msgprint(f"Employee {employee_id} does not have an FCM Token saved. Notification not sent.")
+                frappe.log_error(f"Skipping {employee_id}: No FCM Token saved.")
                 return
             target = {"token": token}
 
     if not target:
-        frappe.msgprint(f"No valid target for {doc.doctype}. Notification not sent.")
+        frappe.log_error(f"No valid target for {doc.doctype}. Skipping.")
         return
 
     message = {
         "message": {
             **target,
-            
             "notification": {
                 "title": title,
                 "body": content
             },
-
             "android": {
                 "priority": "high",
                 "notification": {
@@ -1389,10 +1416,16 @@ def send_fcm_notification(doc, method):
         }
     }
 
-    creds_dict = json.load(open(frappe.get_site_path("private", "files", "firebase-service-account.json")))
-    project_id = creds_dict.get("project_id")
-    if not project_id:
-        frappe.throw("project_id not found in Firebase service account JSON.")
+    # 4. Get Project ID (Safety Added for File Read)
+    try:
+        creds_dict = json.load(open(frappe.get_site_path("private", "files", "firebase-service-account.json")))
+        project_id = creds_dict.get("project_id")
+        if not project_id:
+            frappe.log_error("FCM Config Error", "project_id not found in JSON")
+            return
+    except Exception as e:
+        frappe.log_error("FCM JSON Error", str(e))
+        return
 
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
     headers = {
@@ -1400,15 +1433,145 @@ def send_fcm_notification(doc, method):
         "Content-Type": "application/json"
     }
 
+    # 5. SEND SAFELY (Prevents Server Crashes on 404s)
     try:
         response = requests.post(url, headers=headers, data=json.dumps(message))
-        response.raise_for_status()
-        frappe.msgprint(f"✅ FCM sent successfully! Response: {response.json()}")
+        
+        if response.status_code == 404:
+            frappe.log_error(f"⚠️ FCM Error 404 (Bad Token) for {doc.name}. Skipping.")
+            return
+
+        if response.status_code != 200:
+            frappe.log_error("FCM Send Error", f"Status: {response.status_code}, Response: {response.text}")
+            return
+
     except Exception as e:
-        error_text = getattr(e, "response", None)
-        if error_text:
-            error_text = e.response.text
-        else:
-            error_text = str(e)
-        frappe.log_error(f"FCM V1 Send Error: {error_text}")
-        frappe.throw(f"Failed to send notification: {error_text}")
+        frappe.log_error("FCM Connection Error", str(e))
+
+
+@frappe.whitelist()
+def check_and_send_shift_reminders():
+    """
+    Optimized Hybrid: Checks Shift Assignments AND Default Shifts.
+    Run Frequency: Every 5 minutes.
+    """
+    try:
+        now_dt = frappe.utils.now_datetime()
+        current_date_str = now_dt.strftime("%Y-%m-%d")
+
+        # Step A: Get Explicit Shift Assignments (Priority 1)
+        assignments = frappe.get_all(
+            "Shift Assignment",
+            filters={
+                "start_date": ("<=", current_date_str),
+                "end_date": (">=", current_date_str),
+                "status": "Active",
+                "docstatus": 1
+            },
+            fields=["employee", "shift_type"]
+        )
+        
+        assigned_employee_ids = [d.employee for d in assignments]
+
+        # Step B: Get Default Shifts (Priority 2)
+        # Find active employees with a Default Shift who are NOT in the assignment list
+        filters = {
+            "default_shift": ["is", "set"],
+            "status": "Active"
+        }
+        
+        if assigned_employee_ids:
+            filters["name"] = ["not in", assigned_employee_ids]
+
+        defaults = frappe.get_all(
+            "Employee",
+            filters=filters,
+            fields=["name as employee", "default_shift as shift_type"]
+        )
+
+        # Step C: Combine & Bulk Fetch Timings
+        all_shifts = assignments + defaults
+        
+        if not all_shifts:
+            return
+
+        shift_type_names = list(set([d.shift_type for d in all_shifts]))
+        
+        shift_types = frappe.get_all(
+            "Shift Type",
+            filters={"name": ["in", shift_type_names]},
+            fields=["name", "start_time"]
+        )
+        
+        shift_timing_map = {st.name: st.start_time for st in shift_types}
+
+        # Step D: Process Loop
+        for shift in all_shifts:
+            try:
+                start_time_str = shift_timing_map.get(shift.shift_type)
+                if not start_time_str: 
+                    continue
+                
+                # Combine Date + Time
+                shift_start_dt = frappe.utils.get_datetime(f"{current_date_str} {start_time_str}")
+                
+                # Calculate difference in Minutes
+                diff_seconds = (shift_start_dt - now_dt).total_seconds()
+                diff_minutes = diff_seconds / 60.0
+
+                # --- Condition A: 5 minutes before shift (3 to 7 mins) ---
+                if 3 <= diff_minutes <= 7:
+                    if not has_employee_checked_in(shift.employee, current_date_str):
+                        emp_name = frappe.get_value("Employee", shift.employee, "employee_name")
+                        send_shift_notification(
+                            shift.employee, 
+                            "Shift Reminder", 
+                            f"Hi {emp_name}, your shift starts in 5 minutes. Please check in now."
+                        )
+
+                # --- Condition B: 10 minutes late (-12 to -8 mins) ---
+                elif -12 <= diff_minutes <= -8:
+                    if not has_employee_checked_in(shift.employee, current_date_str):
+                        emp_name = frappe.get_value("Employee", shift.employee, "employee_name")
+                        send_shift_notification(
+                            shift.employee, 
+                            "Missed Check-in Alert", 
+                            f"Hi {emp_name}, your shift started 10 minutes ago. Please mark your attendance immediately."
+                        )
+
+            except Exception as e:
+                frappe.log_error(f"Shift reminder error for {shift.employee}: {e}")
+                continue
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Shift Reminder Job Failed")
+
+
+def has_employee_checked_in(employee, date_str):
+    """
+    Lightweight check for attendance today.
+    """
+    return frappe.db.exists(
+        "Employee Checkin", 
+        {
+            "employee": employee,
+            "time": (">=", f"{date_str} 00:00:00")
+        }
+    )
+
+
+def send_shift_notification(employee_id, title, message):
+    try:
+        doc = frappe.new_doc("App Push Notification")
+        doc.send_to_all = 0
+        doc.send_to_employee = employee_id
+        doc.title = title
+        doc.content = message
+        doc.insert(ignore_permissions=True)
+        doc.submit()
+        
+        # NOTE: Commit removed here to allow Cron to handle transaction efficiently
+        # send_fcm_notification is called via Hooks, which is correct.
+        
+    except Exception as e:
+        frappe.log_error(f"Failed to create notification for {employee_id}: {str(e)}", "Shift Notification Error")
