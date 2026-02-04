@@ -118,7 +118,8 @@ def before_save(doc, method):
                     "Holiday",
                     filters={
                         "holiday_date": ["between", [from_date, to_date]],
-                        "parent": holiday_list
+                        "parent": holiday_list,
+                        "weekly_off": 1
                     }
                 )
                 total_weekly_off = len(holidays)
