@@ -375,7 +375,7 @@ def get_attendance_records(filters: Filters) -> list[dict]:
             Attendance.employee,
             Extract("day", Attendance.attendance_date).as_("day_of_month"),
             (status).as_("status"),
-            Attendance.shift,  #
+            #Attendance.shift,  #shift Column Hide
         )
         .where(
             (Attendance.docstatus == 1)
