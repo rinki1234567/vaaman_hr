@@ -375,7 +375,7 @@ def get_attendance_records(filters: Filters) -> list[dict]:
             Attendance.employee,
             Extract("day", Attendance.attendance_date).as_("day_of_month"),
             (status).as_("status"),
-            #Attendance.shift,  #shift Column Hide
+            # Attendance.shift,  #
         )
         .where(
             (Attendance.docstatus == 1)
@@ -539,9 +539,10 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     summary, attendance_days = get_attendance_summary_and_days(employee, filters)
     if not any(summary.values()):
         return {}
-
+    
     total_days = get_total_days_in_month(filters)
     total_holidays = total_unmarked_days = total_weekly_off = 0
+
 
     for day in range(1, total_days + 1):
         if day in attendance_days:
@@ -554,6 +555,7 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
             total_weekly_off += 1
         elif not status:
             total_unmarked_days += 1
+    
 
     return {
         "total_present": summary.total_present + summary.total_half_days,
@@ -668,38 +670,82 @@ def get_attendance_status_for_detailed_view(
         total_holidays = total_unmarked = total_weekly_off = 0
 
         for day in range(1, total_days + 1):
-            status = status_dict.get(day)
+            attendance_status = status_dict.get(day)
+            holiday_status = get_holiday_status(day, holidays)
+     
+            leave_abbr = leave_details.get(day)
+           
+        
+            if holiday_status == "Holiday":
+                total_holidays += 1
+            
+            # Holiday + Present → H/P
+            if holiday_status == "Holiday" and attendance_status in ["Present", "Work From Home", "Half Day"]:
+                abbr = "H/P"
+                total_holidays -= 1
 
-            if status is None and holidays:
-                status = get_holiday_status(day, holidays)
-
-          
-            if status == "On Leave":
+            elif attendance_status == "On Leave":
                 abbr = leave_details.get(day, "L")
+
+            elif attendance_status:
+                if attendance_status == "Half Day" and leave_abbr:
+                    abbr = f"HD/{leave_abbr}"
+                else:
+                    abbr = status_map.get(attendance_status, "")
+
+            elif holiday_status == "Weekly Off":
+                abbr = "WO"
+
+            elif holiday_status == "Holiday":
+                abbr = "H"
+
             else:
-                abbr = status_map.get(status, "")
+                abbr = ""
 
             row[cstr(day)] = abbr
 
-           
             # Totals calculation
             
-            if abbr in ["P", "WFH"]:
+            if abbr in ["P", "WFH","H/P"]:  
                 total_p += 1
+                
+            elif abbr.startswith("HD/"):
+                total_p += 0.5
+            #  specific leave type with HD
+                leave_type = abbr.split("/")[1]  # "SL", "CL", etc.
+    
+            # Specific leave type field name
+                fieldname_map = {
+                    "SL": "sick_leave",
+                    "CL": "casual_leave",
+                    "PL": "privilege_leave",
+                    "COM": "compensatory_off",
+                    "EL": "earned_leave",
+                    "LWP": "leave_without_pay",
+                   
+                }
+    
+                leave_field = fieldname_map.get(leave_type)
+                if leave_field:
+                    row[leave_field] = row.get(leave_field, 0) + 0.5
+
+                        
             elif abbr == "A":
                 total_a += 1
+            elif abbr.startswith("HD/"):
+                total_p += 0.5
+                total_l += 0.5
             elif abbr in ["CL", "SL", "PL", "LWP", "COM", "ML", "SPL", "L"]:
                 total_l += 1
             elif abbr == "HD/P":
                 total_p += 0.5
                 total_a += 0.5
-                total_l += 0.5
+              
             elif abbr == "HD/A":
                 total_a += 0.5
                 total_p += 0.5
-                total_l += 0.5
-            elif abbr == "H":
-                total_holidays += 1
+               
+            
             elif abbr == "WO":
                 total_weekly_off += 1
             elif not abbr:
