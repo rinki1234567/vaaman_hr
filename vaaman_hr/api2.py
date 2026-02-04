@@ -13,10 +13,8 @@ from frappe.utils import (
     format_time, add_days, time_diff_in_hours, get_system_timezone
 )
 
-
 from frappe.model.workflow import apply_workflow
 from frappe import _
-
 
 @frappe.whitelist()
 def get_current_shift_summary(employee):
@@ -144,8 +142,6 @@ def determine_status(employee, last_checkin):
         return "OUT"
 
     return "IN"
-
-
 
 @frappe.whitelist()
 def get_employee_checkin_status(employee):
@@ -1242,20 +1238,6 @@ def get_filtered_historical_paths(date, department=None, branch=None, employee_i
 
     return {"paths": result_paths}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def get_google_access_token():
     key_file_path = frappe.get_site_path("private", "files", "firebase-service-account.json")
     
@@ -1271,8 +1253,6 @@ def get_google_access_token():
     transport_request = Request()
     creds.refresh(transport_request)
     return creds.token
-
-
 
 @frappe.whitelist()
 def save_fcm_token(employee, fcm_token):
@@ -1352,200 +1332,138 @@ def get_notifications_for_employee(employee_id):
         frappe.log_error(f"Failed to get notifications for {employee_id}: {e}", "Get Notifications Error")
         frappe.throw(f"An error occurred while fetching notifications: {str(e)}")
 
-
-@frappe.whitelist()
-def send_fcm_notification(doc, method=None):
-    # 1. Get Access Token (Original Function)
-    access_token = get_google_access_token()
-    if not access_token:
-        frappe.log_error("FCM Token Error", "Could not get Google Access Token")
-        return
-
-    # 2. Get Data
-    title = getattr(doc, "title", "New Notification")
-    content = getattr(doc, "content", "You have a new update")
-
-    data_payload = {
-        "id": str(doc.name),
-        "doctype": doc.doctype,
-        "title": title,
-        "body": content,
-        "click_action": "FLUTTER_NOTIFICATION_CLICK" 
-    }
-
-    target = None
-    token = None
-
-    # 3. Determine Target
-    if doc.doctype == "App Announcement":
-        target = {"topic": "all_users"}
-    elif doc.doctype == "App Push Notification":
-        if getattr(doc, "send_to_all", False):
-            target = {"topic": "all_users"}
-        elif getattr(doc, "send_to_employee", None):
-            employee_id = doc.send_to_employee
-            helper_name = frappe.db.get_value("Employee Helper", {"employee": employee_id}, "name")
-            if helper_name:
-                token = frappe.db.get_value("Employee Helper", helper_name, "fcm_token")
-                
-            if not token:
-                frappe.log_error(f"Skipping {employee_id}: No FCM Token saved.")
-                return
-            target = {"token": token}
-
-    if not target:
-        frappe.log_error(f"No valid target for {doc.doctype}. Skipping.")
-        return
-
-    message = {
-        "message": {
-            **target,
-            "notification": {
-                "title": title,
-                "body": content
-            },
-            "android": {
-                "priority": "high",
-                "notification": {
-                    "channel_id": "geofence-channel-id",
-                    "visibility": "PUBLIC",
-                    "sound": "default"
-                }
-            },
-            "data": data_payload
-        }
-    }
-
-    # 4. Get Project ID (Safety Added for File Read)
-    try:
-        creds_dict = json.load(open(frappe.get_site_path("private", "files", "firebase-service-account.json")))
-        project_id = creds_dict.get("project_id")
-        if not project_id:
-            frappe.log_error("FCM Config Error", "project_id not found in JSON")
-            return
-    except Exception as e:
-        frappe.log_error("FCM JSON Error", str(e))
-        return
-
-    url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-    headers = {
-        "Authorization": "Bearer " + access_token,
-        "Content-Type": "application/json"
-    }
-
-    # 5. SEND SAFELY (Prevents Server Crashes on 404s)
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(message))
-        
-        if response.status_code == 404:
-            frappe.log_error(f"⚠️ FCM Error 404 (Bad Token) for {doc.name}. Skipping.")
-            return
-
-        if response.status_code != 200:
-            frappe.log_error("FCM Send Error", f"Status: {response.status_code}, Response: {response.text}")
-            return
-
-    except Exception as e:
-        frappe.log_error("FCM Connection Error", str(e))
-
-
 @frappe.whitelist()
 def check_and_send_shift_reminders():
-    """
-    Optimized Hybrid: Checks Shift Assignments AND Default Shifts.
-    Run Frequency: Every 5 minutes.
-    """
     try:
-        now_dt = frappe.utils.now_datetime()
+        now_dt = get_local_now()
         current_date_str = now_dt.strftime("%Y-%m-%d")
-
-        # Step A: Get Explicit Shift Assignments (Priority 1)
-        assignments = frappe.get_all(
-            "Shift Assignment",
-            filters={
-                "start_date": ("<=", current_date_str),
-                "end_date": (">=", current_date_str),
-                "status": "Active",
-                "docstatus": 1
-            },
-            fields=["employee", "shift_type"]
-        )
+        current_time = now_dt.time()
         
-        assigned_employee_ids = [d.employee for d in assignments]
+        dummy_date = datetime.today().date()
+        now_dummy = datetime.combine(dummy_date, current_time)
 
-        # Step B: Get Default Shifts (Priority 2)
-        # Find active employees with a Default Shift who are NOT in the assignment list
-        filters = {
-            "default_shift": ["is", "set"],
-            "status": "Active"
-        }
+        all_shift_types = frappe.get_all("Shift Type", fields=["name", "start_time"])
         
-        if assigned_employee_ids:
-            filters["name"] = ["not in", assigned_employee_ids]
+        shifts_to_process = {}
 
-        defaults = frappe.get_all(
-            "Employee",
-            filters=filters,
-            fields=["name as employee", "default_shift as shift_type"]
-        )
+        for shift in all_shift_types:
+            if not shift.start_time: continue
+            
+            s_time = (datetime.min + shift.start_time).time() if isinstance(shift.start_time, timedelta) else shift.start_time
+            shift_start_dummy = datetime.combine(dummy_date, s_time)
+            
+            diff_minutes = (shift_start_dummy - now_dummy).total_seconds() / 60.0
+            
+            if 3 <= diff_minutes <= 7:
+                shifts_to_process[shift.name] = {
+                    "title": "Shift Reminder ⏰",
+                    "body": "Your shift starts in 5 minutes. Please check in now."
+                }
 
-        # Step C: Combine & Bulk Fetch Timings
-        all_shifts = assignments + defaults
-        
-        if not all_shifts:
+            elif -12 <= diff_minutes <= -8:
+                shifts_to_process[shift.name] = {
+                    "title": "Missed Check-in Alert ⚠️",
+                    "body": "Your shift has started. Please mark your attendance immediately."
+                }
+
+
+        if not shifts_to_process:
             return
 
-        shift_type_names = list(set([d.shift_type for d in all_shifts]))
+        access_token = get_google_access_token()
+        if not access_token:
+            return
         
-        shift_types = frappe.get_all(
-            "Shift Type",
-            filters={"name": ["in", shift_type_names]},
-            fields=["name", "start_time"]
-        )
+
+        try:
+            creds = json.load(open(frappe.get_site_path("private", "files", "firebase-service-account.json")))
+            project_id = creds.get("project_id")
+        except:
+            return
+
+        fcm_url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+        headers = {
+            "Authorization": "Bearer " + access_token,
+            "Content-Type": "application/json"
+        }
+
+
+        target_shifts = list(shifts_to_process.keys())
+
+        checked_in_employees = set(frappe.get_all(
+            "Employee Checkin",
+            filters={"time": (">=", f"{current_date_str} 00:00:00")},
+            pluck="employee",
+            limit_page_length=None
+        ))
+
+        # EFFICIENT SQL: Fetch Employees + Their Shift + Their FCM Tokens in ONE query.
+        # This replaces looping through 25,000 users.
+        users = frappe.db.sql("""
+            SELECT 
+                emp.name as employee, 
+                IFNULL(assign.shift_type, emp.default_shift) as shift_type,
+                helper.fcm_token
+            FROM `tabEmployee` emp
+            LEFT JOIN `tabShift Assignment` assign 
+                ON (assign.employee = emp.name 
+                    AND assign.status = 'Active' 
+                    AND %(today)s BETWEEN assign.start_date AND assign.end_date)
+            LEFT JOIN `tabEmployee Helper` helper 
+                ON helper.employee = emp.name
+            WHERE 
+                emp.status = 'Active'
+                AND helper.fcm_token IS NOT NULL
+                AND IFNULL(assign.shift_type, emp.default_shift) IN %(target_shifts)s
+        """, {
+            "today": current_date_str, 
+            "target_shifts": target_shifts
+        }, as_dict=True)
+
+
+        session = requests.Session()
+        session.headers.update(headers)
+
+        sent_count = 0
         
-        shift_timing_map = {st.name: st.start_time for st in shift_types}
-
-        # Step D: Process Loop
-        for shift in all_shifts:
-            try:
-                start_time_str = shift_timing_map.get(shift.shift_type)
-                if not start_time_str: 
-                    continue
-                
-                # Combine Date + Time
-                shift_start_dt = frappe.utils.get_datetime(f"{current_date_str} {start_time_str}")
-                
-                # Calculate difference in Minutes
-                diff_seconds = (shift_start_dt - now_dt).total_seconds()
-                diff_minutes = diff_seconds / 60.0
-
-                # --- Condition A: 5 minutes before shift (3 to 7 mins) ---
-                if 3 <= diff_minutes <= 7:
-                    if not has_employee_checked_in(shift.employee, current_date_str):
-                        emp_name = frappe.get_value("Employee", shift.employee, "employee_name")
-                        send_shift_notification(
-                            shift.employee, 
-                            "Shift Reminder", 
-                            f"Hi {emp_name}, your shift starts in 5 minutes. Please check in now."
-                        )
-
-                # --- Condition B: 10 minutes late (-12 to -8 mins) ---
-                elif -12 <= diff_minutes <= -8:
-                    if not has_employee_checked_in(shift.employee, current_date_str):
-                        emp_name = frappe.get_value("Employee", shift.employee, "employee_name")
-                        send_shift_notification(
-                            shift.employee, 
-                            "Missed Check-in Alert", 
-                            f"Hi {emp_name}, your shift started 10 minutes ago. Please mark your attendance immediately."
-                        )
-
-            except Exception as e:
-                frappe.log_error(f"Shift reminder error for {shift.employee}: {e}")
+        for user in users:
+            if user.employee in checked_in_employees:
                 continue
 
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Shift Reminder Job Failed")
+            msg_data = shifts_to_process.get(user.shift_type)
+            if not msg_data: continue
 
+            message = {
+                "message": {
+                    "token": user.fcm_token,
+                    "notification": {
+                        "title": msg_data["title"],
+                        "body": msg_data["body"]
+                    },
+                    "android": {
+                        "priority": "high",
+                        "notification": {
+                            "channel_id": "geofence-channel-id"
+                        }
+                    },
+                    "data": {
+                        "click_action": "FLUTTER_NOTIFICATION_CLICK",
+                        "type": "shift_reminder"
+                    }
+                }
+            }
+
+            try:
+                session.post(fcm_url, data=json.dumps(message), timeout=2)
+                sent_count += 1
+            except Exception:
+                pass
+
+        if sent_count > 0:
+            frappe.log_error(f"Sent {sent_count} shift reminders via FCM", "Shift Reminder Job Success")
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Shift Reminder Optimized Error")
 
 def has_employee_checked_in(employee, date_str):
     """
@@ -1559,19 +1477,169 @@ def has_employee_checked_in(employee, date_str):
         }
     )
 
+@frappe.whitelist()
+def send_fcm_notification(doc, method=None):
+    """
+    Unified Production Handler:
+    1. Detects Broadcasts (Announcements OR 'Send to All').
+    2. Blasts 25k+ notifications in background (No UI freeze).
+    3. Handles Single Employee notifications instantly.
+    """
+    
+    # --- 1. SETUP ---
+    access_token = get_google_access_token()
+    if not access_token:
+        frappe.log_error("FCM Token Error", "Could not get Google Access Token")
+        return
 
-def send_shift_notification(employee_id, title, message):
     try:
-        doc = frappe.new_doc("App Push Notification")
-        doc.send_to_all = 0
-        doc.send_to_employee = employee_id
-        doc.title = title
-        doc.content = message
-        doc.insert(ignore_permissions=True)
-        doc.submit()
-        
-        # NOTE: Commit removed here to allow Cron to handle transaction efficiently
-        # send_fcm_notification is called via Hooks, which is correct.
-        
+        creds = json.load(open(frappe.get_site_path("private", "files", "firebase-service-account.json")))
+        project_id = creds.get("project_id")
     except Exception as e:
-        frappe.log_error(f"Failed to create notification for {employee_id}: {str(e)}", "Shift Notification Error")
+        frappe.log_error("FCM Config Error", str(e))
+        return
+
+    fcm_url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+    headers = {
+        "Authorization": "Bearer " + access_token,
+        "Content-Type": "application/json"
+    }
+
+    # Common Data
+    title = getattr(doc, "title", "New Notification")
+    content = getattr(doc, "content", "You have a new update")
+    
+    # Check for Image (Specific to Announcements)
+    image_url = None
+    if doc.doctype == "App Announcement" and getattr(doc, "image", None):
+        if doc.image.startswith("/"):
+            image_url = f"{frappe.utils.get_url()}{doc.image}"
+        else:
+            image_url = doc.image
+
+    # --- SCENARIO A: BROADCAST (ROBUST BLAST) ---
+    is_announcement = (doc.doctype == "App Announcement")
+    is_broadcast_notif = (doc.doctype == "App Push Notification" and getattr(doc, "send_to_all", 0))
+
+    if is_announcement or is_broadcast_notif:
+        
+        # 1. Fetch Tokens + Employee Names (for cleanup logic)
+        users = frappe.db.sql("""
+            SELECT helper.name as helper_id, helper.fcm_token
+            FROM `tabEmployee` emp
+            JOIN `tabEmployee Helper` helper ON helper.employee = emp.name
+            WHERE emp.status = 'Active' AND helper.fcm_token IS NOT NULL
+        """, as_dict=True)
+
+        if not users:
+            return
+
+        # 2. Construct Base Message
+        base_message = {
+            "notification": {
+                "title": title,
+                "body": content
+            },
+            "android": {
+                "priority": "high",
+                "notification": {
+                    "channel_id": "geofence-channel-id",
+                    "sound": "default"
+                }
+            },
+            "data": {
+                "click_action": "FLUTTER_NOTIFICATION_CLICK", 
+                "notification_id": str(doc.name),
+                "type": "announcement" if is_announcement else "general"
+            }
+        }
+
+        if image_url:
+            base_message["notification"]["image"] = image_url
+
+        # 3. Fire Background Worker
+        frappe.enqueue(
+            method=send_broadcast_background, 
+            queue='long', 
+            users=users, 
+            base_message=base_message, 
+            fcm_url=fcm_url, 
+            headers=headers
+        )
+        return
+
+    # --- SCENARIO B: SINGLE EMPLOYEE TARGET ---
+    target_token = None
+    
+    if doc.doctype == "App Push Notification" and getattr(doc, "send_to_employee", None):
+        employee_id = doc.send_to_employee
+        target_token = frappe.db.get_value("Employee Helper", {"employee": employee_id}, "fcm_token")
+
+    if not target_token: 
+        return
+
+    # Send Single Message Instantly
+    message = {
+        "message": {
+            "token": target_token,
+            "notification": {"title": title, "body": content},
+            "android": {"priority": "high", "notification": {"channel_id": "geofence-channel-id"}},
+            "data": {"click_action": "FLUTTER_NOTIFICATION_CLICK", "id": str(doc.name), "type": "personal"}
+        }
+    }
+
+    try:
+        requests.post(fcm_url, headers=headers, data=json.dumps(message))
+    except Exception as e:
+        frappe.log_error("FCM Single Send Error", str(e))
+
+def send_broadcast_background(users, base_message, fcm_url, headers):
+    """
+    Worker to blast 25k+ notifications via persistent session.
+    Includes SELF-CLEANING logic for invalid tokens.
+    """
+    session = requests.Session()
+    session.headers.update(headers)
+    
+    tokens_to_remove = []
+
+    for user in users:
+        payload = {"message": {"token": user.fcm_token, **base_message}}
+        try:
+            resp = session.post(fcm_url, data=json.dumps(payload), timeout=2)
+            
+            if resp.status_code in [400, 404, 410]:
+                tokens_to_remove.append(user.helper_id)
+
+        except:
+            pass
+    
+    if tokens_to_remove:
+        try:
+            frappe.db.sql("""
+                UPDATE `tabEmployee Helper` 
+                SET fcm_token = NULL 
+                WHERE name IN %(ids)s
+            """, {"ids": tokens_to_remove})
+            frappe.db.commit()
+        except Exception:
+            pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
