@@ -17,6 +17,16 @@ def update_earned_leave_frequency_options():
     # Ensure the changes are committed
     frappe.db.commit()
 
+def update_attendance_request_reason_options():
+    doctype = frappe.get_doc("DocType", "Attendance Request")
+    for field in doctype.fields:
+        if field.fieldname == "reason":
+            if "Weekly Off" not in (field.options or ""):
+                field.options = "Work From Home\nOn Duty\nWeekly Off"
+            break
+    doctype.save()
+    frappe.db.commit()
+
 def update_attendance_status_options():
     # Load the Attendance DocType
     doctype = frappe.get_doc("DocType", "Attendance")
