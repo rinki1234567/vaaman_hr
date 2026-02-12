@@ -663,7 +663,7 @@ def get_attendance_status_for_detailed_view(
     #  Shift-wise processing
    
     for shift, status_dict in employee_attendance.items():
-        # row = {"shift": shift}
+        row = {"shift": shift}
         row = {}
 
         total_p = total_a = total_l = 0.0
