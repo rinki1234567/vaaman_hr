@@ -71,8 +71,11 @@ app_license = "mit"
 # before_install = "vaaman_hr.install.before_install"
 # after_install = "vaaman_hr.install.after_install"
 before_app_install = "vaaman_hr.vaaman_hr.patches.apply_monkey_patch"
-# after_migrate = ["vaaman_hr.vaaman_hr.update_field_options.update_earned_leave_frequency_options",
-#               "vaaman_hr.vaaman_hr.update_field_options.update_attendance_status_options"]
+after_migrate = [
+    "vaaman_hr.vaaman_hr.update_field_options.update_earned_leave_frequency_options",
+    "vaaman_hr.vaaman_hr.update_field_options.update_attendance_status_options",
+    "vaaman_hr.vaaman_hr.update_field_options.update_attendance_request_reason_options",
+]
 
 
 
@@ -124,8 +127,9 @@ before_app_install = "vaaman_hr.vaaman_hr.patches.apply_monkey_patch"
 # 	"ToDo": "custom_app.overrides.CustomToDo"
 # }
 
-override_doctype_class = { 
+override_doctype_class = {
         "Attendance": "vaaman_hr.vaaman_hr.api.vaaman_hr" ,
+        "Attendance Request": "vaaman_hr.overrides.attendance_request.CustomAttendanceRequest",
         "Compensatory Leave Request": "vaaman_hr.vaaman_hr.compoff.CompOff",
          "Salary Slip": "vaaman_hr.overrides.salary_slip.CustomSalarySlip"
         } 
