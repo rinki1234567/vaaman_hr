@@ -36,9 +36,8 @@ def update_attendance_request_reason_options():
     set_select_options(
         "Attendance Request",
         "reason",
-        "Work From Home\nOn Duty\nWeekly Off"
+        "Work From Home\nOn Duty\nWeekly Off\nSystem Error\nGatepass in Process"
     )
-
 
 def update_attendance_status_options():
     set_select_options(
