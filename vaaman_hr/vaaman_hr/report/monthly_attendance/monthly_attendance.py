@@ -1,7 +1,3 @@
-# Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
-
-
 from calendar import monthrange
 from itertools import groupby
 
@@ -43,7 +39,9 @@ def execute(filters: Filters | None = None) -> tuple:
 
     if not (filters.month and filters.year):
         frappe.throw(_("Please select month and year."))
-
+    
+    
+    
     if not filters.company:
         frappe.throw(_("Please select company."))
 
@@ -89,22 +87,31 @@ def get_message() -> str:
 
 def get_columns(filters: Filters) -> list[dict]:
     columns = []
-
-    if filters.group_by:
-        options_mapping = {
-            "Branch": "Branch",
-            "Grade": "Employee Grade",
-            "Department": "Department",
-            "Designation": "Designation",
+    options_mapping = {
+        "Branch": "Branch",
+        "Grade": "Employee Grade",
+        "Department": "Department",
+        "Designation": "Designation",
+        "Staff/Worker": "Employee",
         }
+        
+    if filters.group_by == "Staff/Worker":
+        fieldname = "custom_staffworker"
+        fieldtype = "Data"
+        options = None
+    else:
+        fieldname = frappe.scrub(filters.group_by)
+        fieldtype = "Link"
         options = options_mapping.get(filters.group_by)
-        columns.append(
-            {
-                "label": _(filters.group_by),
-                "fieldname": frappe.scrub(filters.group_by),
-                "fieldtype": "Link",
-                "options": options,
-                "width": 120,
+            
+        
+    if filters.group_by:
+        columns.append({
+            "label": _(filters.group_by),
+            "fieldname": fieldname,
+            "fieldtype": fieldtype,
+            "options": options,
+            "width": 120,
             }
         )
 
@@ -309,16 +316,22 @@ def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     data = []
 
     if filters.group_by:
-        group_by_column = frappe.scrub(filters.group_by)
+        if filters.group_by == "Staff/Worker":
+            group_by_column = "custom_staffworker"
+        else:
+            group_by_column = frappe.scrub(filters.group_by)
+        
 
         for value in group_by_param_values:
             if not value:
                 continue
-
-            records = get_rows(employee_details[value], filters, holiday_map, attendance_map)
-
+            
+           
+            current_group_employees = employee_details.get(value, {})
+            
+            records = get_rows(current_group_employees, filters, holiday_map, attendance_map)
             if records:
-                data.append({group_by_column: value})
+                data.append({group_by_column: f"{value}"})
                 data.extend(records)
     else:
         data = get_rows(employee_details, filters, holiday_map, attendance_map)
@@ -373,6 +386,7 @@ def get_attendance_map(filters: Filters) -> dict:
 
 def get_attendance_records(filters: Filters) -> list[dict]:
     Attendance = frappe.qb.DocType("Attendance")
+    Employee = frappe.qb.DocType("Employee")
     status = (
         frappe.qb.terms.Case()
         .when(
@@ -387,6 +401,7 @@ def get_attendance_records(filters: Filters) -> list[dict]:
     )
     query = (
         frappe.qb.from_(Attendance)
+        .join(Employee).on(Attendance.employee == Employee.name)
         .select(
             Attendance.employee,
             Extract("day", Attendance.attendance_date).as_("day_of_month"),
@@ -401,6 +416,9 @@ def get_attendance_records(filters: Filters) -> list[dict]:
             & (Extract("year", Attendance.attendance_date) == filters.year)
         )
     )
+   
+    if filters.get("staff_worker"):
+        query = query.where(Employee.custom_staffworker == filters.get("staff_worker"))
 
     if filters.employee:
         query = query.where(Attendance.employee == filters.employee)
@@ -434,22 +452,31 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
         )
         .where(Employee.company.isin(filters.companies))
     )
+    if filters.get("staff_worker"):
+        query = query.where(Employee.custom_staffworker == filters.get("staff_worker"))
 
+        
     if filters.employee:
         query = query.where(Employee.name == filters.employee)
 
     group_by = filters.group_by
+    group_by_field = ""
     if group_by:
-        group_by = group_by.lower()
-        query = query.orderby(group_by)
-
+        if group_by == "Staff/Worker":
+            group_by_field = "custom_staffworker"
+        else:
+           group_by_field = frappe.scrub(group_by)
+            
+        query = query.orderby(group_by_field)
     employee_details = query.run(as_dict=True)
 
     group_by_param_values = []
     emp_map = {}
 
     if group_by:
-        group_key = lambda d: "" if d[group_by] is None else d[group_by]  # noqa
+        group_key = lambda d: "" if d.get(group_by_field) is None else d.get(group_by_field)  # noqa
+        sorted_details = sorted(employee_details, key=group_key)
+        
         for parameter, employees in groupby(sorted(employee_details, key=group_key), key=group_key):
             group_by_param_values.append(parameter)
             emp_map.setdefault(parameter, frappe._dict())
@@ -725,11 +752,16 @@ def get_attendance_status_for_detailed_view(
             elif attendance_status == "On Leave":
                 abbr = leave_details.get(day, "L")
 
+
             elif attendance_status:
-                if attendance_status == "Half Day" and leave_abbr:
-                    abbr = f"HD/{leave_abbr}"
+                if "Half Day" in attendance_status:
+                    if leave_abbr:
+                        abbr = f"HD/{leave_abbr}"
+                    else:
+                        abbr = status_map.get(attendance_status, "HD")
                 else:
                     abbr = status_map.get(attendance_status, "")
+                        
 
             elif holiday_status == "Weekly Off":
                 abbr = "WO"
