@@ -118,6 +118,8 @@ def get_columns(filters: Filters) -> list[dict]:
                 "width": 135,
             },
             {"label": _("Employee Name"), "fieldname": "employee_name", "fieldtype": "Data", "width": 120},
+            {"label": _("Staff/Worker"), "fieldname": "custom_staffworker", "fieldtype":"Data", "width": 110},
+            {"label": _("Get Pass Number"), "fieldname": "attendance_device_id", "fieldtype": "Data", "width": 120},
         ]
     )
 
@@ -144,6 +146,14 @@ def get_columns(filters: Filters) -> list[dict]:
                     "fieldtype": "Float",
                     "width": 120,
                 },
+                
+                {
+                    "label": _("PPH"),
+                    "fieldname": "pph",
+                    "fieldtype": "Float",
+                    "width": 120,
+                    },
+                
                 {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
                 {
                     "label": _("Unmarked Days"),
@@ -239,6 +249,12 @@ def get_columns(filters: Filters) -> list[dict]:
         "fieldname": "compensatory_off",
         "fieldtype": "Float",
         "width": 160
+        },
+        {
+        "label": _("PPH"),
+        "fieldname": "pph",
+        "fieldtype": "Float",
+        "width": 120
         },
         {
         "label": _("Total Late Entries"),
@@ -412,6 +428,9 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.branch,
             Employee.company,
             Employee.holiday_list,
+            Employee.custom_staffworker,
+            Employee.attendance_device_id,
+            
         )
         .where(Employee.company.isin(filters.companies))
     )
@@ -502,7 +521,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
             leave_summary = get_leave_summary(employee, filters)
             entry_exits_summary = get_entry_exits_summary(employee, filters)
 
-            row = {"employee": employee, "employee_name": details.employee_name}
+            row = {"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,}
             set_defaults_for_summarized_view(filters, row)
             row.update(attendance)
             row.update(leave_summary)
@@ -519,7 +538,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 employee, filters, employee_attendance, holidays
             )
             # set employee details in the first row
-            attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name})
+            attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
 
             records.extend(attendance_for_employee)
 
@@ -542,8 +561,26 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     
     total_days = get_total_days_in_month(filters)
     total_holidays = total_unmarked_days = total_weekly_off = 0
+    total_pph = 0
+    # pph count
+    from_date = f"{filters.year}-{filters.month}-01"
+    to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
+    
+    attendance_list = frappe.db.get_all(
+        "Attendance",
+        filters={
+            "employee": employee,
+            "docstatus": 1,
+            "attendance_date": ["between", [from_date, to_date]],
+            "status": ["in", ["Present", "Work From Home", "Half Day"]],
+        },
+        fields=["attendance_date"]
+    )
 
-
+    total_pph = sum(
+        1 for d in attendance_list
+        if get_holiday_status(d.attendance_date.day, holidays) == "Holiday"
+    )
     for day in range(1, total_days + 1):
         if day in attendance_days:
             continue
@@ -563,7 +600,7 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
         "total_absent": summary.total_absent,
         "total_holidays": total_holidays,
         "total_weekly_off": total_weekly_off,
-        
+        "pph": total_pph,
         "unmarked_days": total_unmarked_days,
     }
 
@@ -668,7 +705,7 @@ def get_attendance_status_for_detailed_view(
 
         total_p = total_a = total_l = 0.0
         total_holidays = total_unmarked = total_weekly_off = 0
-
+        total_pph = 0
         for day in range(1, total_days + 1):
             attendance_status = status_dict.get(day)
             holiday_status = get_holiday_status(day, holidays)
@@ -683,6 +720,7 @@ def get_attendance_status_for_detailed_view(
             if holiday_status == "Holiday" and attendance_status in ["Present", "Work From Home", "Half Day"]:
                 abbr = "H/P"
                 total_holidays -= 1
+                total_pph += 1
 
             elif attendance_status == "On Leave":
                 abbr = leave_details.get(day, "L")
@@ -761,6 +799,7 @@ def get_attendance_status_for_detailed_view(
             "total_holidays": total_holidays,
             "unmarked_days": total_unmarked,
             "total_weekly_off":total_weekly_off,
+            "pph": total_pph
         })
 
        
