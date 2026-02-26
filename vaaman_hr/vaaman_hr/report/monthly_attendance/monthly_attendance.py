@@ -310,6 +310,30 @@ def get_total_days_in_month(filters: Filters) -> int:
     return monthrange(cint(filters.year), cint(filters.month))[1]
 
 
+def get_effective_start_day(date_of_joining, filters: Filters) -> int:
+    """Returns the first day (1-based) that should be visible for an employee in the given filter month. Days before this are blanked out because the employee had not yet joined the company."""
+    
+    if not date_of_joining:
+        return 1
+
+    joining = getdate(date_of_joining)
+    filter_year = cint(filters.year)
+    filter_month = cint(filters.month)
+
+    # Employee joins after this month — all days should be blank
+    if joining.year > filter_year or (
+        joining.year == filter_year and joining.month > filter_month
+    ):
+        return get_total_days_in_month(filters) + 1
+
+    # Employee joins during this month — days before joining day are blank
+    if joining.year == filter_year and joining.month == filter_month:
+        return joining.day
+
+    # Employee joined before this month — all days visible
+    return 1
+
+
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
     holiday_map = get_holiday_map(filters)
@@ -448,7 +472,7 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.holiday_list,
             Employee.custom_staffworker,
             Employee.attendance_device_id,
-            
+            Employee.date_of_joining,
         )
         .where(Employee.company.isin(filters.companies))
     )
@@ -541,7 +565,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
         holidays = holiday_map.get(emp_holiday_list)
 
         if filters.summarized_view:
-            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays)
+            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays, details.date_of_joining)
             if not attendance:
                 continue
 
@@ -562,7 +586,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays
+                employee, filters, employee_attendance, holidays, details.date_of_joining
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -578,7 +602,7 @@ def set_defaults_for_summarized_view(filters, row):
             row[entry.get("fieldname")] = 0.0
 
 
-def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
+def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list, date_of_joining=None) -> dict:
     """Returns dict of attendance status for employee like
     {'total_present': 1.5, 'total_leaves': 0.5, 'total_absent': 13.5, 'total_holidays': 8, 'unmarked_days': 5}
     """
@@ -589,10 +613,11 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     total_days = get_total_days_in_month(filters)
     total_holidays = total_unmarked_days = total_weekly_off = 0
     total_pph = 0
+    effective_start = get_effective_start_day(date_of_joining, filters)
     # pph count
     from_date = f"{filters.year}-{filters.month}-01"
     to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
-    
+
     attendance_list = frappe.db.get_all(
         "Attendance",
         filters={
@@ -607,8 +632,12 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     total_pph = sum(
         1 for d in attendance_list
         if get_holiday_status(d.attendance_date.day, holidays) == "Holiday"
+        and d.attendance_date.day >= effective_start
     )
     for day in range(1, total_days + 1):
+        if day < effective_start:
+            continue
+
         if day in attendance_days:
             continue
 
@@ -687,11 +716,12 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
 ) -> list[dict]:
     """Returns list of shift-wise attendance status for employee with Totals"""
-    
+
     total_days = get_total_days_in_month(filters)
+    effective_start = get_effective_start_day(date_of_joining, filters)
     attendance_values = []
 
     leave_summary = get_leave_summary(employee, filters)
@@ -734,12 +764,15 @@ def get_attendance_status_for_detailed_view(
         total_holidays = total_unmarked = total_weekly_off = 0
         total_pph = 0
         for day in range(1, total_days + 1):
+            if day < effective_start:
+                row[cstr(day)] = ""
+                continue
+
             attendance_status = status_dict.get(day)
             holiday_status = get_holiday_status(day, holidays)
-     
+
             leave_abbr = leave_details.get(day)
-           
-        
+
             if holiday_status == "Holiday":
                 total_holidays += 1
             
