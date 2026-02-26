@@ -1,7 +1,3 @@
-# Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
-
-
 from calendar import monthrange
 from itertools import groupby
 
@@ -43,7 +39,9 @@ def execute(filters: Filters | None = None) -> tuple:
 
     if not (filters.month and filters.year):
         frappe.throw(_("Please select month and year."))
-
+    
+    
+    
     if not filters.company:
         frappe.throw(_("Please select company."))
 
@@ -89,22 +87,31 @@ def get_message() -> str:
 
 def get_columns(filters: Filters) -> list[dict]:
     columns = []
-
-    if filters.group_by:
-        options_mapping = {
-            "Branch": "Branch",
-            "Grade": "Employee Grade",
-            "Department": "Department",
-            "Designation": "Designation",
+    options_mapping = {
+        "Branch": "Branch",
+        "Grade": "Employee Grade",
+        "Department": "Department",
+        "Designation": "Designation",
+        "Staff/Worker": "Employee",
         }
+        
+    if filters.group_by == "Staff/Worker":
+        fieldname = "custom_staffworker"
+        fieldtype = "Data"
+        options = None
+    else:
+        fieldname = frappe.scrub(filters.group_by)
+        fieldtype = "Link"
         options = options_mapping.get(filters.group_by)
-        columns.append(
-            {
-                "label": _(filters.group_by),
-                "fieldname": frappe.scrub(filters.group_by),
-                "fieldtype": "Link",
-                "options": options,
-                "width": 120,
+            
+        
+    if filters.group_by:
+        columns.append({
+            "label": _(filters.group_by),
+            "fieldname": fieldname,
+            "fieldtype": fieldtype,
+            "options": options,
+            "width": 120,
             }
         )
 
@@ -303,22 +310,52 @@ def get_total_days_in_month(filters: Filters) -> int:
     return monthrange(cint(filters.year), cint(filters.month))[1]
 
 
+def get_effective_start_day(date_of_joining, filters: Filters) -> int:
+    """Returns the first day (1-based) that should be visible for an employee in the given filter month. Days before this are blanked out because the employee had not yet joined the company."""
+    
+    if not date_of_joining:
+        return 1
+
+    joining = getdate(date_of_joining)
+    filter_year = cint(filters.year)
+    filter_month = cint(filters.month)
+
+    # Employee joins after this month — all days should be blank
+    if joining.year > filter_year or (
+        joining.year == filter_year and joining.month > filter_month
+    ):
+        return get_total_days_in_month(filters) + 1
+
+    # Employee joins during this month — days before joining day are blank
+    if joining.year == filter_year and joining.month == filter_month:
+        return joining.day
+
+    # Employee joined before this month — all days visible
+    return 1
+
+
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
     holiday_map = get_holiday_map(filters)
     data = []
 
     if filters.group_by:
-        group_by_column = frappe.scrub(filters.group_by)
+        if filters.group_by == "Staff/Worker":
+            group_by_column = "custom_staffworker"
+        else:
+            group_by_column = frappe.scrub(filters.group_by)
+        
 
         for value in group_by_param_values:
             if not value:
                 continue
-
-            records = get_rows(employee_details[value], filters, holiday_map, attendance_map)
-
+            
+           
+            current_group_employees = employee_details.get(value, {})
+            
+            records = get_rows(current_group_employees, filters, holiday_map, attendance_map)
             if records:
-                data.append({group_by_column: value})
+                data.append({group_by_column: f"{value}"})
                 data.extend(records)
     else:
         data = get_rows(employee_details, filters, holiday_map, attendance_map)
@@ -373,6 +410,7 @@ def get_attendance_map(filters: Filters) -> dict:
 
 def get_attendance_records(filters: Filters) -> list[dict]:
     Attendance = frappe.qb.DocType("Attendance")
+    Employee = frappe.qb.DocType("Employee")
     status = (
         frappe.qb.terms.Case()
         .when(
@@ -387,6 +425,7 @@ def get_attendance_records(filters: Filters) -> list[dict]:
     )
     query = (
         frappe.qb.from_(Attendance)
+        .join(Employee).on(Attendance.employee == Employee.name)
         .select(
             Attendance.employee,
             Extract("day", Attendance.attendance_date).as_("day_of_month"),
@@ -401,6 +440,9 @@ def get_attendance_records(filters: Filters) -> list[dict]:
             & (Extract("year", Attendance.attendance_date) == filters.year)
         )
     )
+   
+    if filters.get("staff_worker"):
+        query = query.where(Employee.custom_staffworker == filters.get("staff_worker"))
 
     if filters.employee:
         query = query.where(Attendance.employee == filters.employee)
@@ -430,26 +472,35 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.holiday_list,
             Employee.custom_staffworker,
             Employee.attendance_device_id,
-            
+            Employee.date_of_joining,
         )
         .where(Employee.company.isin(filters.companies))
     )
+    if filters.get("staff_worker"):
+        query = query.where(Employee.custom_staffworker == filters.get("staff_worker"))
 
+        
     if filters.employee:
         query = query.where(Employee.name == filters.employee)
 
     group_by = filters.group_by
+    group_by_field = ""
     if group_by:
-        group_by = group_by.lower()
-        query = query.orderby(group_by)
-
+        if group_by == "Staff/Worker":
+            group_by_field = "custom_staffworker"
+        else:
+           group_by_field = frappe.scrub(group_by)
+            
+        query = query.orderby(group_by_field)
     employee_details = query.run(as_dict=True)
 
     group_by_param_values = []
     emp_map = {}
 
     if group_by:
-        group_key = lambda d: "" if d[group_by] is None else d[group_by]  # noqa
+        group_key = lambda d: "" if d.get(group_by_field) is None else d.get(group_by_field)  # noqa
+        sorted_details = sorted(employee_details, key=group_key)
+        
         for parameter, employees in groupby(sorted(employee_details, key=group_key), key=group_key):
             group_by_param_values.append(parameter)
             emp_map.setdefault(parameter, frappe._dict())
@@ -514,7 +565,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
         holidays = holiday_map.get(emp_holiday_list)
 
         if filters.summarized_view:
-            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays)
+            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays, details.date_of_joining)
             if not attendance:
                 continue
 
@@ -535,7 +586,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays
+                employee, filters, employee_attendance, holidays, details.date_of_joining
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -551,7 +602,7 @@ def set_defaults_for_summarized_view(filters, row):
             row[entry.get("fieldname")] = 0.0
 
 
-def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
+def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list, date_of_joining=None) -> dict:
     """Returns dict of attendance status for employee like
     {'total_present': 1.5, 'total_leaves': 0.5, 'total_absent': 13.5, 'total_holidays': 8, 'unmarked_days': 5}
     """
@@ -562,10 +613,11 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     total_days = get_total_days_in_month(filters)
     total_holidays = total_unmarked_days = total_weekly_off = 0
     total_pph = 0
+    effective_start = get_effective_start_day(date_of_joining, filters)
     # pph count
     from_date = f"{filters.year}-{filters.month}-01"
     to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
-    
+
     attendance_list = frappe.db.get_all(
         "Attendance",
         filters={
@@ -580,8 +632,12 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
     total_pph = sum(
         1 for d in attendance_list
         if get_holiday_status(d.attendance_date.day, holidays) == "Holiday"
+        and d.attendance_date.day >= effective_start
     )
     for day in range(1, total_days + 1):
+        if day < effective_start:
+            continue
+
         if day in attendance_days:
             continue
 
@@ -660,11 +716,12 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
 ) -> list[dict]:
     """Returns list of shift-wise attendance status for employee with Totals"""
-    
+
     total_days = get_total_days_in_month(filters)
+    effective_start = get_effective_start_day(date_of_joining, filters)
     attendance_values = []
 
     leave_summary = get_leave_summary(employee, filters)
@@ -707,12 +764,15 @@ def get_attendance_status_for_detailed_view(
         total_holidays = total_unmarked = total_weekly_off = 0
         total_pph = 0
         for day in range(1, total_days + 1):
+            if day < effective_start:
+                row[cstr(day)] = ""
+                continue
+
             attendance_status = status_dict.get(day)
             holiday_status = get_holiday_status(day, holidays)
-     
+
             leave_abbr = leave_details.get(day)
-           
-        
+
             if holiday_status == "Holiday":
                 total_holidays += 1
             
@@ -725,11 +785,16 @@ def get_attendance_status_for_detailed_view(
             elif attendance_status == "On Leave":
                 abbr = leave_details.get(day, "L")
 
+
             elif attendance_status:
-                if attendance_status == "Half Day" and leave_abbr:
-                    abbr = f"HD/{leave_abbr}"
+                if "Half Day" in attendance_status:
+                    if leave_abbr:
+                        abbr = f"HD/{leave_abbr}"
+                    else:
+                        abbr = status_map.get(attendance_status, "HD")
                 else:
                     abbr = status_map.get(attendance_status, "")
+                        
 
             elif holiday_status == "Weekly Off":
                 abbr = "WO"
