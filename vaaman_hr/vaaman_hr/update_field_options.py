@@ -36,8 +36,18 @@ def update_attendance_request_reason_options():
     set_select_options(
         "Attendance Request",
         "reason",
-        "Work From Home\nOn Duty\nWeekly Off\nSystem Error\nGatepass in Process"
+        "Work From Home\nOn Duty\nWeekly Off\nSystem Error\nGatepass in Process\nChange State of Holiday"
     )
+
+    create_custom_field_if_not_exists("Attendance Request", {
+        "fieldname": "holiday_attendance_status",
+        "label": "Status for Holidays",
+        "fieldtype": "Select",
+        "options": "\nAbsent\nOn Leave",
+        "depends_on": "eval:doc.reason == 'Change State of Holiday'",
+        "mandatory_depends_on": "eval:doc.reason == 'Change State of Holiday'",
+        "insert_after": "include_holidays"
+    })
 
 def update_attendance_status_options():
     set_select_options(
