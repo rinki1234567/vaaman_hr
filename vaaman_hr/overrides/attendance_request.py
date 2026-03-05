@@ -23,7 +23,7 @@ class CustomAttendanceRequest(AttendanceRequest):
 			return "Weekly Off"
 
 		if self.reason == "Change State of Holiday":
-			return self.holiday_attendance_status
+			return "Absent"
 
 		return super().get_attendance_status(attendance_date)
 
@@ -87,11 +87,11 @@ class CustomAttendanceRequest(AttendanceRequest):
 			existing = self.get_attendance_doc(attendance_date)
 
 			if existing:
-				if existing.status == self.holiday_attendance_status:
+				if existing.status == "Absent":
 					attendance_warnings.append(
 						{
 							"date": attendance_date,
-							"reason": f"Already marked as {self.holiday_attendance_status}",
+							"reason": "Already marked as Absent",
 							"action": "Skip",
 						}
 					)
@@ -99,7 +99,7 @@ class CustomAttendanceRequest(AttendanceRequest):
 					attendance_warnings.append(
 						{
 							"date": attendance_date,
-							"reason": f"Existing {existing.status} attendance will be changed to {self.holiday_attendance_status}",
+							"reason": f"Existing {existing.status} attendance will be changed to Absent",
 							"record": existing.name,
 							"action": "Overwrite",
 						}

@@ -142,6 +142,8 @@ class vaaman_hr(OriginalAttendance):
             frappe.throw(_("Cannot mark attendance for an Inactive employee {0}").format(self.employee))
 
     def check_leave_record(self):
+        if self.attendance_request:
+            return
         LeaveApplication = frappe.qb.DocType("Leave Application")
         leave_record = (
             frappe.qb.from_(LeaveApplication)
