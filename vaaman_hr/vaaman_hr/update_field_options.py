@@ -36,8 +36,19 @@ def update_attendance_request_reason_options():
     set_select_options(
         "Attendance Request",
         "reason",
-        "Work From Home\nOn Duty\nWeekly Off\nSystem Error\nGatepass in Process"
+        "Work From Home\nOn Duty\nOutdoor Duty\nWeekly Off\nSystem Error\nGatepass in Process"
     )
+
+
+def update_attendance_request_custom_fields():
+    create_custom_field_if_not_exists("Attendance Request", {
+        "fieldname": "custom_mark_absent",
+        "label": "Mark Absent",
+        "fieldtype": "Check",
+        "insert_after": "include_holidays",
+        "default": "0"
+    })
+
 
 def update_attendance_status_options():
     set_select_options(
