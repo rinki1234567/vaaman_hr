@@ -2,7 +2,6 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, date_diff
 
-from erpnext.setup.doctype.employee.employee import is_holiday
 from hrms.hr.doctype.attendance_request.attendance_request import AttendanceRequest
 
 
@@ -14,7 +13,7 @@ class CustomAttendanceRequest(AttendanceRequest):
 		super().validate()
 
 	def validate_no_attendance_to_create(self):
-		if self.reason in ("Weekly Off", "Change State of Holiday"):
+		if self.reason in ("Weekly Off",) or self.custom_mark_absent:
 			return
 		super().validate_no_attendance_to_create()
 
@@ -22,7 +21,7 @@ class CustomAttendanceRequest(AttendanceRequest):
 		if self.reason == "Weekly Off":
 			return "Weekly Off"
 
-		if self.reason == "Change State of Holiday":
+		if self.custom_mark_absent:
 			return "Absent"
 
 		return super().get_attendance_status(attendance_date)
@@ -31,18 +30,39 @@ class CustomAttendanceRequest(AttendanceRequest):
 		if self.reason == "Weekly Off":
 			return True
 
-		if self.reason == "Change State of Holiday":
-			return is_holiday(self.employee, attendance_date)
+		if self.custom_mark_absent:
+			return True
 
 		return super().should_mark_attendance(attendance_date)
+
+	def create_or_update_attendance(self, date: str):
+		doc = self.get_attendance_doc(date)
+		if doc:
+			# existing record — let the base class handle the update
+			super().create_or_update_attendance(date)
+		else:
+			# new record — base class doesn't set custom_branch, so we do it here
+			branch = frappe.db.get_value("Employee", self.employee, "branch")
+			status = self.get_attendance_status(date)
+			new_doc = frappe.new_doc("Attendance")
+			new_doc.employee = self.employee
+			new_doc.attendance_date = date
+			new_doc.shift = self.shift
+			new_doc.company = self.company
+			new_doc.attendance_request = self.name
+			new_doc.status = status
+			new_doc.half_day_status = "Absent" if status == "Half Day" else None
+			new_doc.custom_branch = branch
+			new_doc.insert(ignore_permissions=True)
+			new_doc.submit()
 
 	@frappe.whitelist()
 	def get_attendance_warnings(self):
 		if self.reason == "Weekly Off":
 			return self._get_weekly_off_warnings()
 
-		if self.reason == "Change State of Holiday":
-			return self._get_holiday_status_warnings()
+		if self.custom_mark_absent:
+			return self._get_mark_absent_warnings()
 
 		return super().get_attendance_warnings()
 
@@ -71,29 +91,18 @@ class CustomAttendanceRequest(AttendanceRequest):
 
 		return attendance_warnings
 
-	def _get_holiday_status_warnings(self):
+	def _get_mark_absent_warnings(self):
 		attendance_warnings = []
 		request_days = date_diff(self.to_date, self.from_date) + 1
 
 		for day in range(request_days):
 			attendance_date = add_days(self.from_date, day)
-
-			if not is_holiday(self.employee, attendance_date):
-				attendance_warnings.append(
-					{"date": attendance_date, "reason": "Not a Holiday", "action": "Skip"}
-				)
-				continue
-
 			existing = self.get_attendance_doc(attendance_date)
 
 			if existing:
 				if existing.status == "Absent":
 					attendance_warnings.append(
-						{
-							"date": attendance_date,
-							"reason": "Already marked as Absent",
-							"action": "Skip",
-						}
+						{"date": attendance_date, "reason": "Already marked as Absent", "action": "Skip"}
 					)
 				else:
 					attendance_warnings.append(
@@ -104,6 +113,5 @@ class CustomAttendanceRequest(AttendanceRequest):
 							"action": "Overwrite",
 						}
 					)
-			# else: new record will be created, no warning needed
 
 		return attendance_warnings

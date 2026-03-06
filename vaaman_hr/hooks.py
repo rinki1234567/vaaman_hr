@@ -75,6 +75,7 @@ after_migrate = [
     "vaaman_hr.vaaman_hr.update_field_options.update_earned_leave_frequency_options",
     "vaaman_hr.vaaman_hr.update_field_options.update_attendance_status_options",
     "vaaman_hr.vaaman_hr.update_field_options.update_attendance_request_reason_options",
+    "vaaman_hr.vaaman_hr.update_field_options.update_attendance_request_custom_fields",
 ]
 
 

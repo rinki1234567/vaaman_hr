@@ -775,12 +775,17 @@ def get_attendance_status_for_detailed_view(
 
             if holiday_status == "Holiday":
                 total_holidays += 1
-            
+
             # Holiday + Present → H/P
             if holiday_status == "Holiday" and attendance_status in ["Present", "Work From Home", "Half Day"]:
                 abbr = "H/P"
                 total_holidays -= 1
                 total_pph += 1
+
+            elif holiday_status == "Holiday" and attendance_status == "Absent":
+                # Holiday marked as Absent — show A, don't count as holiday
+                abbr = "A"
+                total_holidays -= 1
 
             elif attendance_status == "On Leave":
                 abbr = leave_details.get(day, "L")
