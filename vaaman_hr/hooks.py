@@ -213,6 +213,9 @@ scheduler_events = {
     "cron": {
         "*/5 * * * *": [
             "vaaman_hr.api2.check_and_send_shift_reminders"
+        ],
+        "0 23 * * *": [
+            "vaaman_hr.holiday_policy.process_holiday_sandwich_policy"
         ]
     }
 }
