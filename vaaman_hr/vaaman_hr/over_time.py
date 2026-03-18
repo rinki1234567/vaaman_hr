@@ -39,7 +39,7 @@ def calculate_compensatory_leave(doc, method):
                 {
                     "employee": employee,
                     "attendance_date": attendance_date,
-                    "status": ["in", ["Present", "Weekly Off"]],
+                    "status": ["not in", ["Absent", "On Leave"]],
                     "docstatus": 1
                 }
             )
