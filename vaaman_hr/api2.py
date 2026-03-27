@@ -560,15 +560,15 @@ def log_geofence_event(employee, log_type, latitude, longitude, timestamp):
         frappe.throw("Employee, Log Type, Latitude, Longitude, and Timestamp are required.")
     
     try:
-        last_log_type = frappe.db.get_value(
-            "Employee Checkin",
-            {"employee": employee},
-            "log_type",
-            order_by="time desc"
-        )
+        # last_log_type = frappe.db.get_value(
+        #     "Employee Checkin",
+        #     {"employee": employee},
+        #     "log_type",
+        #     order_by="time desc"
+        # )
 
-        if last_log_type and last_log_type == log_type:
-            return {"status": "skipped", "message": "Skipped redundant log; employee is already in this state."}
+        # if last_log_type and last_log_type == log_type:
+        #     return {"status": "skipped", "message": "Skipped redundant log; employee is already in this state."}
         
         try:
             kolkata_tz = pytz.timezone('Asia/Kolkata')
@@ -611,20 +611,20 @@ def log_geofence_event_batch(employee, events):
     logged_count = 0
     skipped_count = 0 
 
-    last_known_log_type = frappe.db.get_value(
-        "Employee Checkin",
-        {"employee": employee},
-        "log_type", 
-        order_by="time desc"
-    )
+    # last_known_log_type = frappe.db.get_value(
+    #     "Employee Checkin",
+    #     {"employee": employee},
+    #     "log_type", 
+    #     order_by="time desc"
+    # )
 
     for event in events_list:
         try:
             event_log_type = event.get("log_type")
             
-            if last_known_log_type and last_known_log_type == event_log_type:
-                skipped_count += 1
-                continue
+            # if last_known_log_type and last_known_log_type == event_log_type:
+            #     skipped_count += 1
+            #     continue
 
             timestamp_val = event.get("timestamp")
             if not timestamp_val:
@@ -656,7 +656,7 @@ def log_geofence_event_batch(employee, events):
             checkin.insert(ignore_permissions=True)
             logged_count += 1
 
-            last_known_log_type = event_log_type
+            # last_known_log_type = event_log_type
 
         except Exception as e:
             frappe.log_error(f"Failed to process one event in geofence batch: {event}. Error: {e}", "Geofence Batch Error")
