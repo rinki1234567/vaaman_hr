@@ -394,6 +394,7 @@ def get_user_login_data(user_id):
         'employee_id': employee_id,
     }
 
+
 @frappe.whitelist()
 def get_pending_approvals():
     try:
@@ -418,7 +419,7 @@ def get_pending_approvals():
 
         leave_requests = frappe.get_all(
             "Leave Application",
-            fields=["name", "leave_type", "from_date", "to_date", "status", "employee", "employee_name", "total_leave_days", "creation","description"],
+            fields=["name", "leave_type", "from_date", "to_date", "status", "employee", "employee_name", "total_leave_days", "creation", "modified", "description"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Open", "Approved", "Rejected", "Cancelled"]]
@@ -428,7 +429,7 @@ def get_pending_approvals():
 
         attendance_requests = frappe.get_all(
             "Attendance Request",
-            fields=["name", "reason", "from_date", "to_date", "explanation", "shift", "docstatus", "employee", "employee_name", "custom_attendance_request_status", "creation"],
+            fields=["name", "reason", "from_date", "to_date", "explanation", "shift", "docstatus", "employee", "employee_name", "custom_attendance_request_status", "creation", "modified"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["docstatus", "in", [0, 1, 2]]
@@ -438,7 +439,7 @@ def get_pending_approvals():
         
         shift_requests = frappe.get_all(
             "Shift Request",
-            fields=["name", "shift_type", "from_date", "to_date", "status", "employee", "employee_name", "creation"],
+            fields=["name", "shift_type", "from_date", "to_date", "status", "employee", "employee_name", "creation", "modified"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Draft", "Approved", "Rejected"]]
@@ -448,7 +449,7 @@ def get_pending_approvals():
         
         expense_approvals = frappe.get_all(
             "Expense Claim",
-            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "custom_rejection_reason"],
+            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "modified", "custom_rejection_reason"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["status", "in", ["Draft", "Unpaid", "Rejected", "Paid"]]
@@ -458,7 +459,7 @@ def get_pending_approvals():
         
         compoff_requests = frappe.get_all(
             "Compensatory Leave Request",
-            fields=["name", "leave_type", "work_from_date", "work_end_date", "reason", "half_day", "docstatus", "employee", "employee_name", "custom_comp_leave_req_status", "creation"],
+            fields=["name", "leave_type", "work_from_date", "work_end_date", "reason", "half_day", "docstatus", "employee", "employee_name", "custom_comp_leave_req_status", "creation", "modified"],
             filters=[
                 ["employee", "in", approvable_employees],
                 ["docstatus", "in", [0, 1, 2]] 
@@ -477,7 +478,7 @@ def get_pending_approvals():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Get Pending Approvals Error")
         frappe.throw(f"An error occurred while fetching approvals: {str(e)}")
-
+        
 @frappe.whitelist()
 def update_approval_status(doctype, docname, action, rejection_reason=None):
     frappe.flags.ignore_permissions = True
