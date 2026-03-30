@@ -984,7 +984,7 @@ def log_employee_location_batch(employee, locations, branch_unit=None):
             log_doc.timestamp = ist_time.replace(tzinfo=None)
             log_doc.branch_unit = branch_unit
             
-            log_doc.activity = loc.get("activity", "UNKNOWN")
+            log_doc.custom_activity = loc.get("activity", "UNKNOWN")
             
             log_doc.insert(ignore_permissions=True)
         
