@@ -983,6 +983,9 @@ def log_employee_location_batch(employee, locations, branch_unit=None):
             log_doc.longitude = flt(loc.get("longitude"))
             log_doc.timestamp = ist_time.replace(tzinfo=None)
             log_doc.branch_unit = branch_unit
+            
+            log_doc.activity = loc.get("activity", "UNKNOWN")
+            
             log_doc.insert(ignore_permissions=True)
         
         frappe.db.commit()
@@ -992,6 +995,7 @@ def log_employee_location_batch(employee, locations, branch_unit=None):
         frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), "Location Batch Logging Failed")
         frappe.throw(f"An error occurred while logging location batch: {str(e)}")
+
 
 @frappe.whitelist()
 def get_shift_time_range(employee_id, date_str):
