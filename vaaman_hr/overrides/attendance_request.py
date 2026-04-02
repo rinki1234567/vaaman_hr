@@ -11,6 +11,10 @@ class CustomAttendanceRequest(AttendanceRequest):
 		if self.reason == "Weekly Off" and self.half_day:
 			frappe.throw(_("Weekly Off and Half Day cannot be selected at the same time."))
 		super().validate()
+		
+	def before_submit(self):
+		if self.custom_attendance_request_status not in ("Approved"):
+			frappe.throw(_("Please select Approved before submitting."))
 
 	def validate_no_attendance_to_create(self):
 		if self.reason in ("Weekly Off",) or self.custom_mark_absent:
