@@ -820,7 +820,7 @@ def get_attendance_status_for_detailed_view(
             elif abbr.startswith("HD/"):
                 total_p += 0.5
                 total_l += 0.5
-                total_l += 0.5
+                total_a += 0.5
             #  specific leave type with HD
                 leave_type = abbr.split("/")[1]  # "SL", "CL", etc.
     
