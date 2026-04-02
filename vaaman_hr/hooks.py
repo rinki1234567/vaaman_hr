@@ -168,7 +168,7 @@ doc_events = {
         "on_submit": "vaaman_hr.api2.send_fcm_notification"
     },
     "Attendance Request": {
-        "before_submit": "vaaman_hr.api2.validate_status_on_submit"
+        "on_submit": "vaaman_hr.api2.validate_status_on_submit"
     }
 }
 
