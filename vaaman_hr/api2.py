@@ -1630,11 +1630,14 @@ def send_broadcast_background(users, base_message, fcm_url, headers):
         except Exception:
             pass
 
-
 def validate_status_on_submit(doc, method):
-    if doc.custom_attendance_request_status not in ["Approved", "Rejected"]:
-        frappe.throw("Status must be either Approved or Rejected.")
+    status = (doc.custom_attendance_request_status or "").strip()
 
+    if status == "":
+        frappe.throw("Please select Approved or Rejected before submitting.")
+
+    if status not in ["Approved", "Rejected"]:
+        frappe.throw("Status must be either Approved or Rejected.")
 
 
 
