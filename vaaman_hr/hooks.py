@@ -167,9 +167,6 @@ doc_events = {
     "App Announcement": {
         "on_submit": "vaaman_hr.api2.send_fcm_notification"
     },
-    "Attendance Request": {
-        "on_submit": "vaaman_hr.api2.validate_status_on_submit"
-    }
 }
 
 
