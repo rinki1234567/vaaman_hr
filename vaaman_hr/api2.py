@@ -1720,7 +1720,7 @@ def get_filtered_historical_pathss(date, department=None, branch=None, custom_br
 
 
 
-
+@frappe.whitelist(allow_guest=True)
 def _safe_shift_range_for_location(employee_id, date_str):
     """
     Safe shift range for location module only.
@@ -1774,7 +1774,7 @@ def _safe_shift_range_for_location(employee_id, date_str):
     return start_dt, end_dt
 
 
-
+@frappe.whitelist(allow_guest=True)
 def get_filtered_historical_paths_with_sql(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
     try:
         date_str = getdate(date).strftime("%Y-%m-%d")
