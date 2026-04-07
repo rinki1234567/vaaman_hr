@@ -1632,148 +1632,7 @@ def send_broadcast_background(users, base_message, fcm_url, headers):
             pass
 
 
-#some new methods for testing app these will never cause any issue in prodcution
-@frappe.whitelist(allow_guest=True)
-def get_filtered_historical_pathss(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
-    try:
-        target_date = frappe.utils.getdate(date)
-        date_str = target_date.strftime("%Y-%m-%d")
-    except Exception:
-        frappe.throw(_("Invalid date format. Use YYYY-MM-DD."))
-
-    emp_filters = {"status": "Active"}
-    if department:
-        emp_filters["department"] = department
-    if branch:
-        emp_filters["branch"] = branch
-    if custom_branch_unit:
-        emp_filters["custom_branch_unit"] = custom_branch_unit
-    if employee_id:
-        emp_filters["name"] = employee_id
-
-    employees = frappe.get_all(
-        "Employee",
-        filters=emp_filters,
-        fields=["name", "first_name", "last_name", "employee_name"]
-    )
-    if not employees:
-        return {"paths": []}
-
-    employee_names = [e.name for e in employees]
-    display_map = {}
-    for emp in employees:
-        display_name = emp.get("employee_name") or f"{emp.get('first_name','')} {emp.get('last_name','')}".strip() or emp.name
-        display_map[emp.name] = display_name
-
-    # Shift windows (safe, location-only)
-    shift_windows = {emp: _safe_shift_range_for_location(emp, date_str) for emp in employee_names}
-
-    overall_start = min(w[0] for w in shift_windows.values())
-    overall_end = max(w[1] for w in shift_windows.values())
-
-    locations = frappe.get_all(
-        "Location Log",
-        filters=[
-            ["employee", "in", employee_names],
-            ["timestamp", "between", [overall_start, overall_end]]
-        ],
-        fields=["employee", "latitude", "longitude", "timestamp", "branch_unit", "custom_activity"],
-        order_by="employee, timestamp asc"
-    )
-    if not locations:
-        return {"paths": []}
-
-    branch_geofences = {}
-    result_paths = []
-
-    for loc in locations:
-        emp_id = loc.employee
-        start, end = shift_windows.get(emp_id, (overall_start, overall_end))
-        if not (start <= loc.timestamp <= end):
-            continue
-
-        geofence = None
-        branch_unit = loc.get("branch_unit")
-        if branch_unit:
-            if branch_unit not in branch_geofences:
-                try:
-                    branch_doc = frappe.get_doc("Branch Unit", branch_unit)
-                    if branch_doc.geofence_vertices:
-                        branch_geofences[branch_unit] = {"vertices": json.loads(branch_doc.geofence_vertices)}
-                    else:
-                        branch_geofences[branch_unit] = None
-                except (frappe.DoesNotExistError, json.JSONDecodeError, TypeError):
-                    branch_geofences[branch_unit] = None
-            geofence = branch_geofences.get(branch_unit)
-
-        result_paths.append({
-            "employee": loc.employee,
-            "employee_name": display_map.get(loc.employee, loc.employee),
-            "latitude": loc.latitude,
-            "longitude": loc.longitude,
-            "timestamp": loc.timestamp,
-            "custom_activity": loc.get("custom_activity"),
-            "geofence": geofence
-        })
-
-    return {"paths": result_paths}
-
-
-
-@frappe.whitelist(allow_guest=True)
-def _safe_shift_range_for_location(employee_id, date_str):
-    """
-    Safe shift range for location module only.
-    Uses Shift Assignment → Default Shift.
-    If nothing found, returns full-day range instead of throwing.
-    Does NOT affect get_shift_time_range used elsewhere.
-    """
-    # Full day fallback
-    full_day = (
-        datetime.strptime(f"{date_str} 00:00:00", "%Y-%m-%d %H:%M:%S"),
-        datetime.strptime(f"{date_str} 23:59:59", "%Y-%m-%d %H:%M:%S")
-    )
-
-    shift_type_name = frappe.db.get_value(
-        "Shift Assignment",
-        {
-            "employee": employee_id,
-            "start_date": ("<=", date_str),
-            "end_date": (">=", date_str),
-            "status": "Active",
-            "docstatus": 1
-        },
-        "shift_type"
-    )
-
-    if not shift_type_name:
-        shift_type_name = frappe.db.get_value("Employee", employee_id, "default_shift")
-
-    if not shift_type_name:
-        return full_day
-
-    shift = frappe.db.get_value(
-        "Shift Type",
-        shift_type_name,
-        ["name", "start_time", "end_time"],
-        as_dict=True
-    )
-    if not shift:
-        return full_day
-
-    # Build window (handles night shift)
-    start_time_str = format_time(shift.start_time, "HH:mm:ss") if shift.start_time else "00:00:00"
-    end_time_str = format_time(shift.end_time, "HH:mm:ss") if shift.end_time else "23:59:59"
-
-    start_dt = datetime.strptime(f"{date_str} {start_time_str}", "%Y-%m-%d %H:%M:%S")
-    end_dt = datetime.strptime(f"{date_str} {end_time_str}", "%Y-%m-%d %H:%M:%S")
-
-    if end_dt <= start_dt:
-        end_dt = add_days(end_dt, 1)
-
-    return start_dt, end_dt
-
-
+#new method for testing app these will never cause any issue in prodcution
 @frappe.whitelist(allow_guest=True)
 def get_filtered_historical_paths_with_sql(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
     try:
@@ -1860,6 +1719,106 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
         })
 
     return {"paths": paths}
+
+
+
+
+
+
+@frappe.whitelist(allow_guest=True)
+def get_filtered_historical_paths_with_sql2(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
+    try:
+        date_str = getdate(date).strftime("%Y-%m-%d")
+    except Exception:
+        frappe.throw(_("Invalid date format. Use YYYY-MM-DD."))
+
+    filters = ["e.status = 'Active'"]
+    params = {"date_str": date_str}
+
+    if department:
+        filters.append("e.department = %(department)s")
+        params["department"] = department
+    if branch:
+        filters.append("e.branch = %(branch)s")
+        params["branch"] = branch
+    if custom_branch_unit:
+        filters.append("e.custom_branch_unit = %(custom_branch_unit)s")
+        params["custom_branch_unit"] = custom_branch_unit
+    if employee_id:
+        filters.append("e.name = %(employee_id)s")
+        params["employee_id"] = employee_id
+
+    where_clause = " AND ".join(filters)
+
+    query = f"""
+        SELECT
+            l.employee,
+            COALESCE(e.employee_name, CONCAT_WS(' ', e.first_name, e.last_name), e.name) AS employee_name,
+            l.latitude,
+            l.longitude,
+            l.timestamp,
+            l.custom_activity,
+            bu.geofence_vertices
+        FROM `tabLocation Log` l
+        JOIN `tabEmployee` e ON e.name = l.employee
+        LEFT JOIN `tabShift Assignment` sa
+            ON sa.employee = e.name
+            AND sa.status = 'Active'
+            AND sa.docstatus = 1
+            AND %(date_str)s BETWEEN sa.start_date AND sa.end_date
+        LEFT JOIN `tabShift Type` st
+            ON st.name = COALESCE(sa.shift_type, e.default_shift)
+        LEFT JOIN `tabBranch Unit` bu
+            ON bu.name = l.branch_unit
+        /* NEW: Join the VaamanHR Settings table based on the employee's branch */
+        LEFT JOIN `tabVaamanHR Settings` vhs
+            ON vhs.branch = e.branch
+        WHERE
+            {where_clause}
+            AND l.timestamp BETWEEN
+                CASE
+                    WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 00:00:00')
+                    ELSE CONCAT(%(date_str)s, ' ', TIME(st.start_time))
+                END
+            AND
+                /* NEW: Wrap the entire End-Time logic in a DATE_ADD to apply the cushion */
+                DATE_ADD(
+                    CASE
+                        WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 23:59:59')
+                        WHEN TIME(st.end_time) <= TIME(st.start_time)
+                            THEN DATE_ADD(CONCAT(%(date_str)s, ' ', TIME(st.end_time)), INTERVAL 1 DAY)
+                        ELSE CONCAT(%(date_str)s, ' ', TIME(st.end_time))
+                    END,
+                    INTERVAL COALESCE(vhs.shift_end_cushion, 0) MINUTE
+                )
+        ORDER BY l.employee, l.timestamp
+    """
+
+    rows = frappe.db.sql(query, params, as_dict=True)
+    if not rows:
+        return {"paths": []}
+
+    paths = []
+    for r in rows:
+        geofence = None
+        if r.geofence_vertices:
+            try:
+                geofence = {"vertices": json.loads(r.geofence_vertices)}
+            except Exception:
+                geofence = None
+
+        paths.append({
+            "employee": r.employee,
+            "employee_name": r.employee_name,
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "timestamp": r.timestamp,
+            "custom_activity": r.custom_activity,
+            "geofence": geofence
+        })
+
+    return {"paths": paths}
+
 
 
 
