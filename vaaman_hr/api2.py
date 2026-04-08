@@ -449,10 +449,10 @@ def get_pending_approvals():
         
         expense_approvals = frappe.get_all(
             "Expense Claim",
-            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "modified", "custom_rejection_reason"],
+            fields=["name", "posting_date", "total_claimed_amount", "status", "employee", "employee_name", "approval_status", "creation", "modified", "custom_rejection_reason","docstatus"],
             filters=[
                 ["employee", "in", approvable_employees],
-                ["status", "in", ["Draft", "Unpaid", "Rejected", "Paid"]]
+                ["status", "in", ["Draft", "Unpaid", "Rejected", "Paid","Submitted"]]
             ],
             order_by="creation desc"
         )
