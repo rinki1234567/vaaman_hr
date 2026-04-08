@@ -15,6 +15,13 @@ class CustomAttendanceRequest(AttendanceRequest):
     def before_submit(self):
         if self.custom_attendance_request_status not in ("Approved", "Rejected"):
             frappe.throw(_("Attendance Request Status must be Approved or Rejected before submitting."))
+            
+        employee_approver = frappe.db.get_value("Employee", self.employee, "leave_approver")
+        if employee_approver != frappe.session.user:
+            frappe.throw(
+                _("Only the designated leave approver can submit this request."), 
+                frappe.PermissionError
+            )
 
     def on_submit(self):
         if self.custom_attendance_request_status == "Approved":
