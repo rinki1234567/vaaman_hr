@@ -9,7 +9,7 @@ from hrms.hr.utils import get_holiday_dates_for_employee
 
 class CustomSalarySlip(ERPNextSalarySlip):
 
-    def get_working_days_details(self, lwp=None, for_preview=0):
+    def get_working_days_details(self, lwp=None, for_preview=0, lwp_days_corrected=None):
         """
         Custom logic applies ONLY when:
         Salary Structure Assignment.weekly_off_on_attendance = 1
@@ -19,7 +19,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
 
         # ---------- BASIC SAFETY ----------
         if not self.employee:
-            return super().get_working_days_details(lwp, for_preview)
+            return super().get_working_days_details(lwp, for_preview, lwp_days_corrected)
 
         start_date = getdate(self.start_date)
         end_date = getdate(self.end_date)
@@ -41,12 +41,12 @@ class CustomSalarySlip(ERPNextSalarySlip):
 
         # ---------- EXIT EARLY IF CUSTOM LOGIC SHOULD NOT APPLY ----------
         if not ssa:
-            return super().get_working_days_details(lwp, for_preview)
+            return super().get_working_days_details(lwp, for_preview, lwp_days_corrected)
 
         weekly_off_on_attendance, override_absent_on_holiday = ssa
 
         if not cint(weekly_off_on_attendance):
-            return super().get_working_days_details(lwp, for_preview)
+            return super().get_working_days_details(lwp, for_preview, lwp_days_corrected)
 
         override_absent_on_holiday = cint(override_absent_on_holiday or 0)
 
@@ -114,3 +114,9 @@ class CustomSalarySlip(ERPNextSalarySlip):
         self.payment_days = flt(self.total_working_days) - flt(self.absent_days)
         self.payment_days = max(0, self.payment_days)
         self.absent_days = max(0, self.absent_days)
+        
+        # ---------- HANDLE LWP DAYS CORRECTED (Payroll Correction) ----------
+        if lwp_days_corrected and lwp_days_corrected > 0:
+            from hrms.payroll.doctype.salary_slip.salary_slip import verify_lwp_days_corrected
+            if verify_lwp_days_corrected(self.employee, self.start_date, self.end_date, lwp_days_corrected):
+                self.payment_days += lwp_days_corrected
