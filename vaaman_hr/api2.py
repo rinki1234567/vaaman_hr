@@ -121,12 +121,30 @@ def determine_status(employee, last_checkin):
     if not last_checkin or last_checkin.log_type == "OUT":
         return "OUT"
 
+    # shift_end_dt = get_shift_end_datetime(employee, last_checkin.time)
+    # current_time = get_local_now()
+
+    # if shift_end_dt and current_time < shift_end_dt:
+    #     return "IN"
+
     shift_end_dt = get_shift_end_datetime(employee, last_checkin.time)
     current_time = get_local_now()
 
-    if shift_end_dt and current_time < shift_end_dt:
-        return "IN"
+    if shift_end_dt:
+        cushion_minutes = 60  
+        branch = frappe.db.get_value("Employee", employee, "branch")
+        if branch:
+            settings_name = frappe.db.get_value("VaamanHR Settings", {"branch": branch}, "name")
+            if settings_name:
+                cushion_val = frappe.db.get_value("VaamanHR Settings", settings_name, "shift_end_cushion")
+                if cushion_val is not None:
+                    cushion_minutes = int(cushion_val)
 
+        cushioned_shift_end_dt = shift_end_dt + timedelta(minutes=cushion_minutes)
+
+        if current_time < cushioned_shift_end_dt:
+            return "IN"
+            
     last_geo_log = frappe.db.get_value(
         "Employee Checkin", 
         {
