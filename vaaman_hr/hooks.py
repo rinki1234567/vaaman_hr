@@ -132,7 +132,7 @@ override_doctype_class = {
         "Attendance": "vaaman_hr.vaaman_hr.api.vaaman_hr" ,
         "Attendance Request": "vaaman_hr.overrides.attendance_request.CustomAttendanceRequest",
         "Compensatory Leave Request": "vaaman_hr.vaaman_hr.compoff.CompOff",
-         "Salary Slip": "vaaman_hr.overrides.salary_slip.CustomSalarySlip"
+        "Salary Slip": "vaaman_hr.overrides.salary_slip.CustomSalarySlip"
         } 
 
 
@@ -148,8 +148,13 @@ override_doctype_class = {
 # 		"on_trash": "method"
 # 	}
 # }
+
 doc_events = {
-     "OverTime Import": {
+    "Attendance": {
+        "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.validate_half_day_attendance"
+    },
+    
+    "OverTime Import": {
         "on_submit": "vaaman_hr.vaaman_hr.over_time.calculate_compensatory_leave",
         "on_cancel": "vaaman_hr.vaaman_hr.over_time.cancel_compensatory_leave"
     },

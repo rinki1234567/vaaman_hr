@@ -120,7 +120,7 @@ frappe.query_reports["Monthly Attendance"] = {
 			fieldname: "summarized_view",
 			label: __("Summarized View"),
 			fieldtype: "Check",
-			Default: 0,
+			default: 0,
 		},
 	],
 	onload: function () {
