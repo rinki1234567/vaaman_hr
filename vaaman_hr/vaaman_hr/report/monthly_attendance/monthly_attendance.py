@@ -760,9 +760,16 @@ def get_attendance_status_for_detailed_view(
                     if len(day_leaves) > 1:
                         abbr = f"HD/{l_str}"; t_l += 1.0
                     elif day_leaves:
-                        abbr = f"HD/{other}/{l_str}"; t_l += 0.5
-                        if other == "P": t_p += 0.5
-                        else: t_a += 0.5
+                        abbr = f"HD/{other}/{l_str}"
+                        if day_leaves:
+                            t_l += 0.5
+                        if other == "P":
+                            t_p += 0.5
+                        else:
+                            t_a += 0.5
+                        # abbr = f"HD/{other}/{l_str}"; t_l += 0.5
+                        # if other == "P": t_p += 0.5
+                        # else: t_a += 0.5
                     else:
                         abbr = f"HD/{other}"
                         if other == "P": t_p += 0.5
