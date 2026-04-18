@@ -740,11 +740,17 @@ def get_attendance_status_for_detailed_view(
             
             abbr = ""
             if h_status == "Holiday":
-                abbr = "H/P" if day_att and day_att.status in ["Present", "Half Day"] else "H"
-                if abbr == "H": t_h += 1
-                else: t_pph += 1
+                if day_att and day_att.status == "Absent":
+                    abbr = "A"; t_a += 1
+                elif day_att and day_att.status in ["Present", "Half Day"]:
+                    abbr = "H/P"; t_pph += 1
+                else:
+                    abbr = "H"; t_h += 1
             elif h_status == "Weekly Off":
-                abbr = "WO"; t_wo += 1
+                if day_att and day_att.status == "Absent":
+                    abbr = "A"; t_a += 1
+                else:
+                    abbr = "WO"; t_wo += 1
             elif day_att:
                 if day_att.status == "Half Day":
                     other = "P" if day_att.half_day_status == "Present" else "A"
