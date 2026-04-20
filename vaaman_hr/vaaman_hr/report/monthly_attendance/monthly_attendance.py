@@ -745,48 +745,60 @@ def get_attendance_status_for_detailed_view(
                 else: t_pph += 1
             elif h_status == "Weekly Off":
                 abbr = "WO"; t_wo += 1
-            elif day_att:
+
+            elif day_att:   
                 if day_att.status == "Half Day":
-                    other = "P" if day_att.half_day_status == "Present" else "A"
+                    other_half = "P" if day_att.half_day_status == "Present" else "A"
+
+                    # Get leave abbreviation
                     if day_att.leave_type == "Sick Leave - Zinc":
                         m_leave = "SLZ"
                     else:
                         m_leave = leave_type_abbr.get(day_att.leave_type, "")
-                        
-                    if m_leave and m_leave not in day_leaves: 
+
+                    if m_leave and m_leave not in day_leaves:
                         day_leaves.append(m_leave)
-                    
-                    l_str = "/".join(day_leaves)
-                    if len(day_leaves) > 1:
-                        abbr = f"HD/{l_str}"; t_l += 1.0
-                    elif day_leaves:
-                        abbr = f"HD/{other}/{l_str}"
-                        if day_leaves:
+
+                    l_str = "/".join(day_leaves) if day_leaves else ""
+
+                    if day_leaves:
+                        if len(day_leaves) > 1:
+                            # Multiple leaves on half day → e.g. HD/CL/SL
+                            abbr = f"HD/{l_str}"
+                            t_l += 1.0
+                        else:
+                            # Single leave on half day → e.g. HD/A/CL  or  HD/P/CL
+                            abbr = f"HD/{other_half}/{l_str}"
                             t_l += 0.5
-                        if other == "P":
+                            if other_half == "P":
+                                t_p += 0.5      # Other half is Present
+                            else:
+                                t_a += 0.5      # Other half is Absent   ← This is what you wanted
+                    else:
+                        # Pure Half Day (no leave linked)
+                        abbr = f"HD/{other_half}"
+                        if other_half == "P":
                             t_p += 0.5
                         else:
                             t_a += 0.5
-                        # abbr = f"HD/{other}/{l_str}"; t_l += 0.5
-                        # if other == "P": t_p += 0.5
-                        # else: t_a += 0.5
-                    else:
-                        abbr = f"HD/{other}"
-                        if other == "P": t_p += 0.5
-                        else: t_a += 0.5
-                
+
                 elif day_att.status == "On Leave":
                     if day_att.leave_type == "Sick Leave - Zinc":
                         m_leave = "SLZ"
                     else:
                         m_leave = leave_type_abbr.get(day_att.leave_type, "L") if day_att.leave_type else "L"
-                        
+
                     abbr = m_leave if m_leave not in day_leaves else "/".join(day_leaves)
                     t_l += 1.0
+
                 else:
+                    # Normal attendance: Present, Absent, Work From Home, etc.
                     abbr = status_map.get(day_att.status, "")
-                    if abbr == "P" or day_att.status == "Work From Home": t_p += 1.0
-                    elif abbr == "A": t_a += 1.0
+                    if abbr == "P" or day_att.status == "Work From Home":
+                        t_p += 1.0
+                    elif abbr == "A":
+                        t_a += 1.0
+
             else:
                 t_un += 1
 
