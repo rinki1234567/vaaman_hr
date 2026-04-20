@@ -33,7 +33,7 @@ def process_holiday_sandwich_policy():
 	employees = frappe.db.get_all(
 		"Employee",
 		filters={"status": "Active"},
-		fields=["name", "user_id", "company", "branch"]
+		fields=["name", "user_id", "company", "branch", "holiday_list"]
 	)
 
 	if not employees:
@@ -60,6 +60,43 @@ def process_holiday_sandwich_policy():
 		day = getdate(rec.attendance_date).day
 		att_map.setdefault(rec.employee, {})[day] = rec
 
+	# Build holiday map from Holiday List: { holiday_list_name -> { day -> "Holiday"/"Weekly Off" } }
+	default_holiday_lists = {}  # cache per company
+	holiday_list_day_map = {}   # { list_name -> { day_number -> status } }
+
+	def get_holiday_status_from_list(holiday_list_name):
+		if holiday_list_name in holiday_list_day_map:
+			return holiday_list_day_map[holiday_list_name]
+		rows = frappe.db.get_all(
+			"Holiday",
+			filters={
+				"parent": holiday_list_name,
+				"holiday_date": ["between", [str(from_date), str(to_date)]]
+			},
+			fields=["holiday_date", "weekly_off"]
+		)
+		day_map = {}
+		for r in rows:
+			d_num = getdate(r.holiday_date).day
+			day_map[d_num] = "Weekly Off" if r.weekly_off else "Holiday"
+		holiday_list_day_map[holiday_list_name] = day_map
+		return day_map
+
+	def get_d1_status_from_holiday_list(emp_name, day_num):
+		"""Returns 'Holiday', 'Weekly Off', or None by checking employee's holiday list."""
+		emp = employee_map[emp_name]
+		hl = emp.holiday_list
+		if not hl:
+			company = emp.company
+			if company not in default_holiday_lists:
+				default_holiday_lists[company] = frappe.get_cached_value(
+					"Company", company, "default_holiday_list"
+				)
+			hl = default_holiday_lists[company]
+		if not hl:
+			return None
+		return get_holiday_status_from_list(hl).get(day_num)
+
 	# Step 3: For each employee scan day 3 → today
 	for emp_name, employee in employee_map.items():
 		emp_att = att_map.get(emp_name, {})
@@ -74,8 +111,17 @@ def process_holiday_sandwich_policy():
 				continue
 
 			# Check 2 — D-1 is Holiday or Weekly Off
+			# First check attendance record, then fall back to holiday list
 			rec_d1 = emp_att.get(d1)
-			if not rec_d1 or rec_d1.status not in ["Holiday", "Weekly Off"]:
+			if rec_d1 and rec_d1.status in ["Holiday", "Weekly Off"]:
+				original_status = rec_d1.status
+			elif not rec_d1:
+				hl_status = get_d1_status_from_holiday_list(emp_name, d1)
+				if not hl_status:
+					continue
+				original_status = hl_status
+				rec_d1 = None  # no attendance record exists — will create directly
+			else:
 				continue
 
 			# Check 3 — D-2 is Absent
@@ -84,25 +130,25 @@ def process_holiday_sandwich_policy():
 				continue
 
 			# All 3 conditions passed
-			original_status = rec_d1.status
 			holiday_date    = datetime.date(year, month, d1)
 			day_before_date = datetime.date(year, month, d2)
 			day_after_date  = datetime.date(year, month, d)
 
 			try:
-				# Cancel the existing Holiday / Weekly Off attendance record
-				existing_doc = frappe.get_doc("Attendance", rec_d1.name)
-				existing_doc.flags.ignore_permissions = True
-				existing_doc.cancel()
-				frappe.db.commit()
+				# Cancel the existing Holiday / Weekly Off attendance record if it exists
+				if rec_d1 and rec_d1.get("name"):
+					existing_doc = frappe.get_doc("Attendance", rec_d1.name)
+					existing_doc.flags.ignore_permissions = True
+					existing_doc.cancel()
+					frappe.db.commit()
 
 				# Create a new Absent attendance for D-1
 				att = frappe.new_doc("Attendance")
 				att.employee        = emp_name
 				att.attendance_date = holiday_date
 				att.status          = "Absent"
-				att.company         = rec_d1.company or employee.company
-				att.custom_branch   = rec_d1.custom_branch or employee.branch
+				att.company         = (rec_d1.company if rec_d1 else None) or employee.company
+				att.custom_branch   = (rec_d1.custom_branch if rec_d1 else None) or employee.branch
 				att.flags.ignore_permissions = True
 				att.insert()
 				att.submit()
@@ -174,7 +220,7 @@ def debug_holiday_sandwich():
 	employees = frappe.db.get_all(
 		"Employee",
 		filters={"status": "Active"},
-		fields=["name", "user_id", "company", "branch"]
+		fields=["name", "user_id", "company", "branch", "holiday_list"]
 	)
 
 	print(f"Total active employees: {len(employees)}\n")
@@ -197,6 +243,34 @@ def debug_holiday_sandwich():
 		day = getdate(rec.attendance_date).day
 		att_map.setdefault(rec.employee, {})[day] = rec
 
+	# Build holiday-list day map for fallback
+	default_holiday_lists = {}
+	holiday_list_day_map = {}
+
+	def get_hl_day_map(hl_name):
+		if hl_name in holiday_list_day_map:
+			return holiday_list_day_map[hl_name]
+		rows = frappe.db.get_all(
+			"Holiday",
+			filters={"parent": hl_name, "holiday_date": ["between", [str(from_date), str(to_date)]]},
+			fields=["holiday_date", "weekly_off"]
+		)
+		day_map = {getdate(r.holiday_date).day: ("Weekly Off" if r.weekly_off else "Holiday") for r in rows}
+		holiday_list_day_map[hl_name] = day_map
+		return day_map
+
+	def get_d1_hl_status(emp_name, day_num):
+		emp = employee_map[emp_name]
+		hl = emp.holiday_list
+		if not hl:
+			company = emp.company
+			if company not in default_holiday_lists:
+				default_holiday_lists[company] = frappe.get_cached_value("Company", company, "default_holiday_list")
+			hl = default_holiday_lists[company]
+		if not hl:
+			return None
+		return get_hl_day_map(hl).get(day_num)
+
 	matched = 0
 	for emp_name in employee_names:
 		emp_att = att_map.get(emp_name, {})
@@ -209,16 +283,27 @@ def debug_holiday_sandwich():
 			rec_d1 = emp_att.get(d1)
 			rec_d2 = emp_att.get(d2)
 
-			if (
-				rec_d  and rec_d.status  == "Absent"
-				and rec_d1 and rec_d1.status in ["Holiday", "Weekly Off"]
-				and rec_d2 and rec_d2.status == "Absent"
-			):
-				print(
-					f"Employee {emp_name} | "
-					f"Day {d2} Absent → Day {d1} {rec_d1.status} → Day {d} Absent"
-					f"  >>> WILL BE MARKED ABSENT <<<"
-				)
-				matched += 1
+			if not rec_d or rec_d.status != "Absent":
+				continue
+			if not rec_d2 or rec_d2.status != "Absent":
+				continue
+
+			if rec_d1 and rec_d1.status in ["Holiday", "Weekly Off"]:
+				d1_status = rec_d1.status
+				source = "Attendance record"
+			elif not rec_d1:
+				d1_status = get_d1_hl_status(emp_name, d1)
+				if not d1_status:
+					continue
+				source = "Holiday List"
+			else:
+				continue
+
+			print(
+				f"Employee {emp_name} | "
+				f"Day {d2} Absent → Day {d1} {d1_status} ({source}) → Day {d} Absent"
+				f"  >>> WILL BE MARKED ABSENT <<<"
+			)
+			matched += 1
 
 	print(f"\n=== Total sandwiches found: {matched} ===")
