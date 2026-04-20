@@ -135,30 +135,30 @@ def process_holiday_sandwich_policy():
 			day_after_date  = datetime.date(year, month, d)
 
 			try:
-				# Cancel the existing Holiday / Weekly Off attendance record if it exists
 				if rec_d1 and rec_d1.get("name"):
-					existing_doc = frappe.get_doc("Attendance", rec_d1.name)
-					existing_doc.flags.ignore_permissions = True
-					existing_doc.cancel()
+					# Attendance record exists — directly override status in DB (no cancel/create)
+					frappe.db.set_value("Attendance", rec_d1.name, "status", "Absent")
 					frappe.db.commit()
-
-				# Create a new Absent attendance for D-1
-				att = frappe.new_doc("Attendance")
-				att.employee        = emp_name
-				att.attendance_date = holiday_date
-				att.status          = "Absent"
-				att.company         = (rec_d1.company if rec_d1 else None) or employee.company
-				att.custom_branch   = (rec_d1.custom_branch if rec_d1 else None) or employee.branch
-				att.flags.ignore_permissions = True
-				att.insert()
-				att.submit()
-				frappe.db.commit()
+					att_name = rec_d1.name
+				else:
+					# No attendance record — Holiday/WO comes from Holiday List, create fresh Absent
+					att = frappe.new_doc("Attendance")
+					att.employee        = emp_name
+					att.attendance_date = holiday_date
+					att.status          = "Absent"
+					att.company         = employee.company
+					att.custom_branch   = employee.branch
+					att.flags.ignore_permissions = True
+					att.insert()
+					att.submit()
+					frappe.db.commit()
+					att_name = att.name
 
 				# Log to Attendance Policy Log
 				frappe.get_doc({
 					"doctype": "Attendance Policy Log",
 					"employee": emp_name,
-					"attendance": att.name,
+					"attendance": att_name,
 					"attendance_date": str(holiday_date),
 					"action_taken": f"Marked as Absent ({original_status} Sandwich)",
 					"remarks": (
@@ -183,12 +183,11 @@ def process_holiday_sandwich_policy():
 					)
 
 				# Update att_map so cascading sandwiches in the same run are also detected
-				# e.g. Absent → Holiday → Weekly Off → Absent across 4 days
 				emp_att[d1] = frappe._dict({
-					"name": att.name,
+					"name": att_name,
 					"status": "Absent",
-					"company": att.company,
-					"custom_branch": att.custom_branch
+					"company": (rec_d1.company if rec_d1 else None) or employee.company,
+					"custom_branch": (rec_d1.custom_branch if rec_d1 else None) or employee.branch
 				})
 
 			except Exception as e:
