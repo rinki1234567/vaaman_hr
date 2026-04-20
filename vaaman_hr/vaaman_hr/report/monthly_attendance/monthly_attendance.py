@@ -568,58 +568,6 @@ def set_defaults_for_summarized_view(filters, row):
             row[entry.get("fieldname")] = 0.0
 
 
-# def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
-#     """Returns dict of attendance status for employee like
-#     {'total_present': 1.5, 'total_leaves': 0.5, 'total_absent': 13.5, 'total_holidays': 8, 'unmarked_days': 5}
-#     """
-#     summary, attendance_days = get_attendance_summary_and_days(employee, filters)
-#     if not any(summary.values()):
-#         return {}
-    
-#     total_days = get_total_days_in_month(filters)
-#     total_holidays = total_unmarked_days = total_weekly_off = 0
-#     total_pph = 0
-#     # pph count
-#     from_date = f"{filters.year}-{filters.month}-01"
-#     to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
-    
-#     attendance_list = frappe.db.get_all(
-#         "Attendance",
-#         filters={
-#             "employee": employee,
-#             "docstatus": 1,
-#             "attendance_date": ["between", [from_date, to_date]],
-#             "status": ["in", ["Present", "Work From Home", "Half Day"]],
-#         },
-#         fields=["attendance_date"]
-#     )
-
-#     total_pph = sum(
-#         1 for d in attendance_list
-#         if get_holiday_status(d.attendance_date.day, holidays) == "Holiday"
-#     )
-#     for day in range(1, total_days + 1):
-#         if day in attendance_days:
-#             continue
-
-#         status = get_holiday_status(day, holidays)
-#         if status =="Holiday":
-#             total_holidays += 1
-#         elif status == "Weekly Off":
-#             total_weekly_off += 1
-#         elif not status:
-#             total_unmarked_days += 1
-    
-
-#     return {
-#         "total_present": summary.total_present + summary.total_half_days,
-#         "total_leaves": summary.total_leaves + summary.total_half_days,
-#         "total_absent": summary.total_absent,
-#         "total_holidays": total_holidays,
-#         "total_weekly_off": total_weekly_off,
-#         "pph": total_pph,
-#         "unmarked_days": total_unmarked_days,
-#     }
 def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
     # Sync with detailed view logic
     detailed_data = get_attendance_status_for_detailed_view(employee, filters, {"": {}}, holidays)
@@ -748,9 +696,17 @@ def get_attendance_status_for_detailed_view(
 
             elif day_att:   
                 if day_att.status == "Half Day":
-                    other_half = "P" if day_att.half_day_status == "Present" else "A"
+                    # FIXED: Correct way to determine which half is absent/present
+                    if day_att.half_day_status == "Absent":
+                        # Half day is Absent → Other half is Present
+                        half_absent = True
+                        abbr_other = "P"
+                    else:
+                        # Half day is Present → Other half is Absent
+                        half_absent = False
+                        abbr_other = "A"
 
-                    # Get leave abbreviation
+                    # Get leave type abbreviation if any
                     if day_att.leave_type == "Sick Leave - Zinc":
                         m_leave = "SLZ"
                     else:
@@ -763,24 +719,27 @@ def get_attendance_status_for_detailed_view(
 
                     if day_leaves:
                         if len(day_leaves) > 1:
-                            # Multiple leaves on half day → e.g. HD/CL/SL
                             abbr = f"HD/{l_str}"
                             t_l += 1.0
                         else:
-                            # Single leave on half day → e.g. HD/A/CL  or  HD/P/CL
-                            abbr = f"HD/{other_half}/{l_str}"
+                            abbr = f"HD/{abbr_other}/{l_str}"
                             t_l += 0.5
-                            if other_half == "P":
-                                t_p += 0.5      # Other half is Present
+                            if half_absent:
+                                t_a += 0.5   # Half day Absent
+                                # Other half is automatically Present → so add to present
+                                t_p += 0.5
                             else:
-                                t_a += 0.5      # Other half is Absent   ← This is what you wanted
+                                t_p += 0.5   # Half day Present
+                                t_a += 0.5   # Other half Absent
                     else:
-                        # Pure Half Day (no leave linked)
-                        abbr = f"HD/{other_half}"
-                        if other_half == "P":
-                            t_p += 0.5
-                        else:
+                        # Pure Half Day (no leave)
+                        abbr = f"HD/{abbr_other}"
+                        if half_absent:
                             t_a += 0.5
+                            t_p += 0.5      # Other half Present
+                        else:
+                            t_p += 0.5
+                            t_a += 0.5      # Other half Absent
 
                 elif day_att.status == "On Leave":
                     if day_att.leave_type == "Sick Leave - Zinc":
