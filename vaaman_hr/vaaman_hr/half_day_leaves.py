@@ -6,7 +6,7 @@ def validate_half_day_attendance(doc, method=None):
 
     if doc.status == "Half Day":
 
-        # 🔹 Fetch Checkin Logs
+        #  Fetch Checkin Logs
         logs = frappe.get_all(
             "Employee Checkin",
             filters={
@@ -27,7 +27,7 @@ def validate_half_day_attendance(doc, method=None):
         in_time = None
         out_time = None
 
-        # 🔹 Session-wise calculation
+        #  Session-wise calculation
         last_in = None
         
         for log in logs:
@@ -64,6 +64,8 @@ def validate_half_day_attendance(doc, method=None):
 
         status_ok = False
         error_msg = ""
+    
+        
 
         # No Punch
         if working_hours == 0:
@@ -123,3 +125,7 @@ def validate_half_day_attendance(doc, method=None):
             "working_hours": doc.working_hours or 0,
             "half_day_status": doc.half_day_status
         })
+
+
+
+

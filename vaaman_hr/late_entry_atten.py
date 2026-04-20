@@ -4,7 +4,6 @@ from frappe.utils import getdate, get_time
 from collections import defaultdict
 
 def process_attendance_policy():
-    print("--- Script Started ---")
     # Fetch attendance records for late entry
     
     attendance_records = frappe.db.sql("""
@@ -12,7 +11,7 @@ def process_attendance_policy():
         FROM `tabAttendance` att
         WHERE att.status = 'Present'
         AND att.docstatus = 1
-        AND att.attendance_date >= '2025-01-01'
+        AND att.attendance_date >= '2026-04-01'
         AND att.custom_branch = 'Head Office'
         AND NOT EXISTS (
                 SELECT la.name FROM `tabLeave Application` la 

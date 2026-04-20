@@ -568,58 +568,6 @@ def set_defaults_for_summarized_view(filters, row):
             row[entry.get("fieldname")] = 0.0
 
 
-# def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
-#     """Returns dict of attendance status for employee like
-#     {'total_present': 1.5, 'total_leaves': 0.5, 'total_absent': 13.5, 'total_holidays': 8, 'unmarked_days': 5}
-#     """
-#     summary, attendance_days = get_attendance_summary_and_days(employee, filters)
-#     if not any(summary.values()):
-#         return {}
-    
-#     total_days = get_total_days_in_month(filters)
-#     total_holidays = total_unmarked_days = total_weekly_off = 0
-#     total_pph = 0
-#     # pph count
-#     from_date = f"{filters.year}-{filters.month}-01"
-#     to_date = f"{filters.year}-{filters.month}-{get_total_days_in_month(filters)}"
-    
-#     attendance_list = frappe.db.get_all(
-#         "Attendance",
-#         filters={
-#             "employee": employee,
-#             "docstatus": 1,
-#             "attendance_date": ["between", [from_date, to_date]],
-#             "status": ["in", ["Present", "Work From Home", "Half Day"]],
-#         },
-#         fields=["attendance_date"]
-#     )
-
-#     total_pph = sum(
-#         1 for d in attendance_list
-#         if get_holiday_status(d.attendance_date.day, holidays) == "Holiday"
-#     )
-#     for day in range(1, total_days + 1):
-#         if day in attendance_days:
-#             continue
-
-#         status = get_holiday_status(day, holidays)
-#         if status =="Holiday":
-#             total_holidays += 1
-#         elif status == "Weekly Off":
-#             total_weekly_off += 1
-#         elif not status:
-#             total_unmarked_days += 1
-    
-
-#     return {
-#         "total_present": summary.total_present + summary.total_half_days,
-#         "total_leaves": summary.total_leaves + summary.total_half_days,
-#         "total_absent": summary.total_absent,
-#         "total_holidays": total_holidays,
-#         "total_weekly_off": total_weekly_off,
-#         "pph": total_pph,
-#         "unmarked_days": total_unmarked_days,
-#     }
 def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
     # Sync with detailed view logic
     detailed_data = get_attendance_status_for_detailed_view(employee, filters, {"": {}}, holidays)
@@ -753,40 +701,59 @@ def get_attendance_status_for_detailed_view(
                     abbr = "WO"; t_wo += 1
             elif day_att:
                 if day_att.status == "Half Day":
-                    other = "P" if day_att.half_day_status == "Present" else "A"
+                    # =============================================================
+                    # YOUR EXACT REQUIREMENT:
+                    # If half_day_status == "Absent"  → Show "HD/A"  (Half Absent + Other Present)
+                    # If half_day_status == "Present" → Show "HD/P"  (Half Present + Other Absent)
+                    # =============================================================
+                    if day_att.half_day_status == "Absent":
+                        # Half day is Absent → Other half is Present
+                        abbr = "HD/A"
+                        t_a += 0.5      # Half day Absent
+                        t_p += 0.5      # Other half Present
+                    else:
+                        # Half day is Present → Other half is Absent
+                        abbr = "HD/P"
+                        t_p += 0.5      # Half day Present
+                        t_a += 0.5      # Other half Absent
+
+                    # Handle Leave Type if linked with this Half Day
                     if day_att.leave_type == "Sick Leave - Zinc":
                         m_leave = "SLZ"
                     else:
                         m_leave = leave_type_abbr.get(day_att.leave_type, "")
-                        
-                    if m_leave and m_leave not in day_leaves: 
+
+                    if m_leave and m_leave not in day_leaves:
                         day_leaves.append(m_leave)
-                    
-                    l_str = "/".join(day_leaves)
-                    if len(day_leaves) > 1:
-                        abbr = f"HD/{l_str}"; t_l += 1.0
-                    elif day_leaves:
-                        abbr = f"HD/{other}/{l_str}"; t_l += 0.5
-                        if other == "P": t_p += 0.5
-                        else: t_a += 0.5
-                    else:
-                        abbr = f"HD/{other}"
-                        if other == "P": t_p += 0.5
-                        else: t_a += 0.5
-                
+
+                    l_str = "/".join(day_leaves) if day_leaves else ""
+
+                    # If there is any leave on this day, combine it
+                    if day_leaves:
+                        if len(day_leaves) > 1:
+                            abbr = f"HD/{l_str}"                    # e.g. HD/CL/SL
+                        else:
+                            abbr = f"{abbr}/{l_str}"                # e.g. HD/A/CL  or  HD/P/SL
+
                 elif day_att.status == "On Leave":
                     if day_att.leave_type == "Sick Leave - Zinc":
                         m_leave = "SLZ"
                     else:
                         m_leave = leave_type_abbr.get(day_att.leave_type, "L") if day_att.leave_type else "L"
-                        
+
                     abbr = m_leave if m_leave not in day_leaves else "/".join(day_leaves)
                     t_l += 1.0
+
                 else:
+                    # Normal attendance: Present, Absent, Work From Home, etc.
                     abbr = status_map.get(day_att.status, "")
-                    if abbr == "P" or day_att.status == "Work From Home": t_p += 1.0
-                    elif abbr == "A": t_a += 1.0
+                    if abbr in ("P", "WFH") or day_att.status == "Work From Home":
+                        t_p += 1.0
+                    elif abbr == "A":
+                        t_a += 1.0
+
             else:
+                # No attendance record → Unmarked day
                 t_un += 1
 
             # --- COLOR LOGIC ADDED HERE ---
