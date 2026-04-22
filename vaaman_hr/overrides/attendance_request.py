@@ -29,7 +29,8 @@ class CustomAttendanceRequest(AttendanceRequest):
         if self.custom_attendance_request_status == "Approved":
             super().on_submit()
         else:
-            frappe.msgprint("Attendance Request is Rejected. No attendance will be marked.")
+            frappe.msgprint("Attendance Request is Rejected. The request will now be cancelled.")
+            self.cancel()
 
     def validate_no_attendance_to_create(self):
         if self.reason in ("Weekly Off",) or self.custom_mark_absent:
