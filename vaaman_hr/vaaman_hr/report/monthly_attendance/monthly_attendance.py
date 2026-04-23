@@ -320,6 +320,28 @@ def get_total_days_in_month(filters: Filters) -> int:
     return monthrange(cint(filters.year), cint(filters.month))[1]
 
 
+def get_effective_start_day(date_of_joining, filters: Filters) -> int:
+    """Returns the first day (1-based) visible for an employee in the filter month.
+    Days before this are blanked because the employee had not yet joined."""
+    if not date_of_joining:
+        return 1
+
+    joining = getdate(date_of_joining)
+    filter_year = cint(filters.year)
+    filter_month = cint(filters.month)
+
+    # Joined after this month — all days blank
+    if joining.year > filter_year or (joining.year == filter_year and joining.month > filter_month):
+        return get_total_days_in_month(filters) + 1
+
+    # Joined during this month — days before joining day are blank
+    if joining.year == filter_year and joining.month == filter_month:
+        return joining.day
+
+    # Joined before this month — all days visible
+    return 1
+
+
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
     holiday_map = get_holiday_map(filters)
@@ -447,7 +469,7 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.holiday_list,
             Employee.custom_staffworker,
             Employee.attendance_device_id,
-            
+            Employee.date_of_joining,
         )
         .where(Employee.company.isin(filters.companies))
     )
@@ -531,7 +553,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
         holidays = holiday_map.get(emp_holiday_list)
 
         if filters.summarized_view:
-            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays)
+            attendance = get_attendance_status_for_summarized_view(employee, filters, holidays, details.date_of_joining)
             if not attendance:
                 continue
 
@@ -552,7 +574,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays
+                employee, filters, employee_attendance, holidays, details.date_of_joining
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -568,9 +590,9 @@ def set_defaults_for_summarized_view(filters, row):
             row[entry.get("fieldname")] = 0.0
 
 
-def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list) -> dict:
+def get_attendance_status_for_summarized_view(employee: str, filters: Filters, holidays: list, date_of_joining=None) -> dict:
     # Sync with detailed view logic
-    detailed_data = get_attendance_status_for_detailed_view(employee, filters, {"": {}}, holidays)
+    detailed_data = get_attendance_status_for_detailed_view(employee, filters, {"": {}}, holidays, date_of_joining)
     if not detailed_data: return {}
     res = detailed_data[0]
     return {
@@ -637,9 +659,10 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
 ) -> list[dict]:
     total_days = get_total_days_in_month(filters)
+    effective_start = get_effective_start_day(date_of_joining, filters)
     attendance_values = []
     leave_summary = get_leave_summary(employee, filters)
     entry_exit = get_entry_exits_summary(employee, filters)
@@ -682,6 +705,10 @@ def get_attendance_status_for_detailed_view(
         t_p = t_a = t_l = t_h = t_wo = t_un = t_pph = 0.0
 
         for day in range(1, total_days + 1):
+            if day < effective_start:
+                row[cstr(day)] = ""
+                continue
+
             day_att = att_map.get(day)
             h_status = get_holiday_status(day, holidays)
             day_leaves = list(set(leave_day_map.get(day, [])))
