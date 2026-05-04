@@ -13,7 +13,7 @@
    "fieldname": "feature",
    "fieldtype": "Select",
    "label": "Feature",
-   "options": "Attendance\nHoliday\nLeave\nAttendance Req\nShift Req\nFace and Geo\nLocation\nPayroll\nExpense Claim\nHelpDesk\nComp Off"
+   "options": "Attendance\nHoliday\nLeave\nAttendance Req\nShift Req\nFace and Geo\nLocation\nPayroll\nExpense Claim\nHelpDesk\nComp Off\nGRN"
   }
  ],
  "grid_page_length": 50,
