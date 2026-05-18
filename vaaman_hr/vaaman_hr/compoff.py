@@ -126,8 +126,25 @@ from hrms.hr.utils import get_holiday_dates_for_employee
 
 class CompOff(CompensatoryLeaveRequest): 
     def validate(self):
+        self.check_duplicate_request()
         self.validate_attendance()
         self.validate_holidays()
+
+    def check_duplicate_request(self):
+        existing = frappe.db.exists("Compensatory Leave Request", {
+            "employee": self.employee,
+            "work_from_date": self.work_from_date,
+            "work_end_date": self.work_end_date,
+            "docstatus": 1,
+            "name": ["!=", self.name],
+        })
+        if existing:
+            frappe.throw(
+                _("A Compensatory Leave Request for {1} already exists for this employee.").format(
+                    frappe.bold(format_date(self.work_from_date)),
+                    frappe.bold(format_date(self.work_end_date)),
+                )
+            )
 
     def validate_attendance(self):        
         attendance_records = frappe.get_all(
