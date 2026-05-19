@@ -158,7 +158,7 @@ def validate_half_day_attendance(doc, method=None):
     is_saturday = attendance_date.weekday() == 5
     
     min_hd_hours = 4.0 if is_saturday else 4.5
-    full_day_hours = 8.5
+    full_day_hours = 7.0 if is_saturday else 8.5
     
     final_status = "Absent"
     final_half_day_status = ""
@@ -210,8 +210,4 @@ def validate_half_day_attendance(doc, method=None):
     doc.working_hours = flt(working_hours)
     doc.status = final_status
     doc.half_day_status = final_half_day_status
-
-
-
-
 
