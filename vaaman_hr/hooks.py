@@ -173,6 +173,9 @@ doc_events = {
     "App Announcement": {
         "on_submit": "vaaman_hr.api2.send_fcm_notification"
     },
+    "Purchase Receipt": {
+        "on_submit": "vaaman_hr.draft_purchase_invoice.auto_create_purchase_invoice"
+    }
 }
 
 
