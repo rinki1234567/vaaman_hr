@@ -265,3 +265,115 @@ def cancel_compensatory_leave(doc, method):
     except Exception:
         logger.error(frappe.get_traceback(), "Compensatory Leave Cancellation Error")
         raise
+
+
+# ---------------------------------------------------------
+# UPDATE AFTER SUBMIT: Delta recalculation
+# ---------------------------------------------------------
+@frappe.whitelist()
+def recalculate_compensatory_leave_on_update(doc, method):
+    """
+    Triggered on OverTime Import on_update_after_submit.
+    Compares old rows (from _doc_before_save) against new rows and only
+    acts on what changed — reverses deleted/changed rows, creates new/changed rows.
+    Unchanged rows are left untouched.
+    """
+    old_doc = doc._doc_before_save
+    if not old_doc:
+        return
+
+    old_rows = {
+        (str(row.employee), str(row.attendance_date)): row
+        for row in old_doc.overtime_import_details
+        if row.employee and row.attendance_date
+    }
+    new_rows = {
+        (str(row.employee), str(row.attendance_date)): row
+        for row in doc.overtime_import_details
+        if row.employee and row.attendance_date
+    }
+
+    for key in set(old_rows) | set(new_rows):
+        old_row = old_rows.get(key)
+        new_row = new_rows.get(key)
+
+        if old_row and not new_row:
+            # Row deleted — reverse its comp-off
+            _reverse_comp_off_for_row(old_row)
+
+        elif new_row and not old_row:
+            # Row added — create comp-off
+            _create_comp_off_for_row(new_row)
+
+        elif old_row and new_row:
+            old_ot = old_row.over_time or 0
+            new_ot = new_row.over_time or 0
+            if old_ot != new_ot:
+                # OT hours changed — reverse old, create new
+                _reverse_comp_off_for_row(old_row)
+                _create_comp_off_for_row(new_row)
+            # else: unchanged — leave comp-off as-is
+
+
+def _reverse_comp_off_for_row(row):
+    overtime_hours = row.over_time or 0
+    if overtime_hours <= 0:
+        return
+
+    total_leave_days = overtime_hours / 8
+    comp_leave_valid_from = add_days(row.attendance_date, 1)
+    comp_leave_valid_to = add_days(comp_leave_valid_from, 59)
+
+    leave_allocation = get_existing_allocation_for_date(row.employee, comp_leave_valid_from)
+    if not leave_allocation:
+        return
+
+    leave_allocation.new_leaves_allocated -= total_leave_days
+    if leave_allocation.new_leaves_allocated < 0:
+        leave_allocation.new_leaves_allocated = 0
+    leave_allocation.total_leaves_allocated = leave_allocation.new_leaves_allocated
+    leave_allocation.validate()
+    leave_allocation.db_set("new_leaves_allocated", leave_allocation.new_leaves_allocated)
+    leave_allocation.db_set("total_leaves_allocated", leave_allocation.total_leaves_allocated)
+
+    create_compensatory_ledger_entry(
+        leave_allocation,
+        total_leave_days * -1,
+        comp_leave_valid_from,
+        comp_leave_valid_to,
+    )
+    logger.info(f"Reversed comp-off for {row.employee} on {row.attendance_date}: -{total_leave_days} days")
+
+
+def _create_comp_off_for_row(row):
+    overtime_hours = row.over_time or 0
+    if overtime_hours <= 0:
+        return
+
+    compoff_enabled = frappe.db.get_value("Employee", row.employee, "compensatory_off")
+    if not compoff_enabled:
+        logger.warning(f"SKIPPED: Employee {row.employee} does not have compensatory_off enabled")
+        return
+
+    attendance = frappe.db.exists(
+        "Attendance",
+        {
+            "employee": row.employee,
+            "attendance_date": row.attendance_date,
+            "status": ["not in", ["Absent", "On Leave"]],
+            "docstatus": 1,
+        },
+    )
+    if not attendance:
+        logger.warning(f"SKIPPED: No valid attendance for {row.employee} on {row.attendance_date}")
+        return
+
+    total_leave_days = overtime_hours / 8
+    comp_leave_valid_from = add_days(row.attendance_date, 1)
+
+    leave_allocation = get_existing_allocation_for_date(row.employee, comp_leave_valid_from)
+    if leave_allocation:
+        update_leave_allocation(leave_allocation, total_leave_days, comp_leave_valid_from)
+    else:
+        create_leave_allocation(row.employee, row.attendance_date, total_leave_days)
+    logger.info(f"Created comp-off for {row.employee} on {row.attendance_date}: +{total_leave_days} days")
