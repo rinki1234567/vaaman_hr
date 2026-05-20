@@ -4,8 +4,8 @@ def calculate_overtime_hours(doc, method):
     if not doc.start_date or not doc.end_date:
         return
 
-    # Fetch total overtime hours from Overtime Import Item
-    total_overtime = frappe.db.sql("""
+    # OT from submitted Overtime Import records
+    overtime_import_ot = frappe.db.sql("""
         SELECT SUM(oti.over_time)
         FROM `tabOvertime Import Item` oti
         INNER JOIN `tabOverTime Import` oti_parent
@@ -15,5 +15,15 @@ def calculate_overtime_hours(doc, method):
         AND oti_parent.docstatus = 1
     """, (doc.employee, doc.start_date, doc.end_date))[0][0] or 0
 
-    # Update Salary Slip field
-    doc.total_overtime_hours = total_overtime
+    # OT from OT Adjustment records (matched by month falling in salary period)
+    ot_adjustment_ot = frappe.db.sql("""
+        SELECT SUM(oai.additinal_ot)
+        FROM `tabot adjustment item` oai
+        INNER JOIN `tabOT Adjustment` oa
+            ON oai.parent = oa.name
+        WHERE oai.employee = %s
+        AND oa.month BETWEEN %s AND %s
+        AND oa.docstatus != 2
+    """, (doc.employee, doc.start_date, doc.end_date))[0][0] or 0
+
+    doc.total_overtime_hours = overtime_import_ot + ot_adjustment_ot
