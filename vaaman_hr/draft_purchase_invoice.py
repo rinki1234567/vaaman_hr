@@ -126,6 +126,8 @@ def create_pi_as_admin(receipt_name, posting_date, supplier_delivery_note, suppl
             
         pi_doc.flags.ignore_mandatory = True 
         
+        pi_doc.custom_auto_generated = 1
+        
 
         pi_doc.insert() 
 
