@@ -2,6 +2,7 @@ from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSa
 import frappe
 from frappe.utils import getdate, flt, cint
 from packaging import version
+from datetime import timedelta
 
 # ==========================================
 # VERSION DETECTION
@@ -188,26 +189,39 @@ class CustomSalarySlip(ERPNextSalarySlip):
             fields=[
                 "attendance_date",
                 "status",
+                "half_day_status",
             ],
         )
 
         attendance_by_date = {
-            getdate(row.attendance_date): row.status
+            getdate(row.attendance_date): (row.status, row.half_day_status)
             for row in attendance_rows
         }
+
+        # ---------- PAYROLL SETTING ----------
+        consider_unmarked_as = frappe.db.get_single_value(
+            "Payroll Settings", "consider_unmarked_attendance_as"
+        )
 
         # ---------- ABSENT COUNT ----------
         absent_days = 0
 
-        for current_date, status in attendance_by_date.items():
-
-            if status != "Absent":
-                continue
-
+        current_date = period_start
+        while current_date <= period_end:
             is_holiday = current_date in holidays
+            record = attendance_by_date.get(current_date)
+            status, half_day_status = record if record else (None, None)
 
-            if override_absent_on_holiday or not is_holiday:
+            if status == "Absent":
+                if override_absent_on_holiday or not is_holiday:
+                    absent_days += 1
+            elif status == "Half Day" and half_day_status == "Absent":
+                if override_absent_on_holiday or not is_holiday:
+                    absent_days += 0.5
+            elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
                 absent_days += 1
+
+            current_date += timedelta(days=1)
 
         # ---------- FINAL VALUES ----------
         self.total_working_days = total_working_days
