@@ -7,7 +7,8 @@ def execute(filters=None):
         {"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 150},
         {"label": "Late Entries", "fieldname": "late_entries", "fieldtype": "Int", "width": 100},
         {"label": "Early Exits", "fieldname": "early_exits", "fieldtype": "Int", "width": 100},
-        {"label": "Converted to Casual Leave", "fieldname": "converted", "fieldtype": "Int", "width": 180}
+        {"label": "Total Occasions (Late+Early)", "fieldname": "total_occasions", "fieldtype": "Int", "width": 160},
+        {"label": "Excess (Above 3)", "fieldname": "converted", "fieldtype": "Int", "width": 120},
     ]
 
     from_date = filters.get("from_date")
@@ -27,15 +28,17 @@ def execute(filters=None):
 
         late = sum(1 for l in logs if l.late_entry)
         early = sum(1 for l in logs if l.early_exit)
-
-        converted = max(0, (late + early) - 3)
+        # Combined max 3: same day with both flags counts once
+        total_occasions = sum(1 for l in logs if l.late_entry or l.early_exit)
+        converted = max(0, total_occasions - 3)
 
         data.append({
             "employee": emp.name,
             "employee_name": emp.employee_name,
             "late_entries": late,
             "early_exits": early,
-            "converted": converted
+            "total_occasions": total_occasions,
+            "converted": converted,
         })
 
     return columns, data

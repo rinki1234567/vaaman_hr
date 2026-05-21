@@ -13,10 +13,10 @@ CORE_IN_TIME = "10:00:00"
 WEEKDAY_FULL_DAY_OUT = "18:30:00"  # must work till 6:30 PM
 SATURDAY_FULL_DAY_OUT = "17:00:00"  # may leave by 5:00 PM
 
-# 15-minute grace for late-in / early-out counting (3 occasions per month)
-LATE_ENTRY_AFTER = "10:15:00"
-WEEKDAY_EARLY_EXIT_BEFORE = "18:15:00"
-SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"
+# 15-minute grace — each counts as 1 of 3 allowed occasions per month (late + early combined)
+LATE_ENTRY_AFTER = "10:15:00"  # late by up to 15 min (after 10:00 AM)
+WEEKDAY_EARLY_EXIT_BEFORE = "18:15:00"  # leave early by up to 15 min (before 6:30 PM)
+SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"  # leave early by up to 15 min (before 5:00 PM)
 
 POLICY = {
 	"weekday": {
@@ -24,7 +24,7 @@ POLICY = {
 		"min_half_day_hours": 4.5,
 		"core_in_by": LATE_ENTRY_AFTER,
 		"first_half_out_by": "14:30:00",
-		"second_half_in_by": "13:30:00",
+		"second_half_in_by": "14:00:00",
 		"full_day_out_by": WEEKDAY_FULL_DAY_OUT,
 	},
 	"saturday": {
@@ -53,6 +53,13 @@ def is_head_office_employee(employee):
 def head_office_branch_condition(alias="e"):
 	"""SQL fragment: employee or attendance custom_branch is Head Office."""
 	return f"({alias}.branch = '{HEAD_OFFICE_BRANCH}' OR att.custom_branch = '{HEAD_OFFICE_BRANCH}')"
+
+
+def is_exempt_from_head_office_policy(attendance):
+	"""Attendance Request overrides policy — do not recalculate status or late/early flags."""
+	if isinstance(attendance, str):
+		return bool(frappe.db.get_value("Attendance", attendance, "attendance_request"))
+	return bool(getattr(attendance, "attendance_request", None))
 
 
 def has_approved_half_day_leave(employee, attendance_date):
@@ -100,18 +107,26 @@ def calc_working_hours(logs):
 
 
 def check_late_entry_early_exit(in_time, out_time, attendance_date):
-	"""Return (late_entry, early_exit) as 0/1 per Head Office policy."""
+	"""
+	Return (late_entry, early_exit) as 0/1.
+	Each flag uses one of 3 allowed monthly occasions (combined late + early).
+	- late_entry: in after 10:15 AM
+	- early_exit: out before mandatory time but within 15-min early grace
+	"""
 	if not in_time or not out_time:
 		return 0, 0
 
 	in_t = get_time(in_time)
 	out_t = get_time(out_time)
+	rules = get_rules(attendance_date)
 
 	late_entry = 1 if in_t > get_time(LATE_ENTRY_AFTER) else 0
-	if is_saturday(attendance_date):
-		early_exit = 1 if out_t < get_time(SATURDAY_EARLY_EXIT_BEFORE) else 0
-	else:
-		early_exit = 1 if out_t < get_time(WEEKDAY_EARLY_EXIT_BEFORE) else 0
+	# Early exit = left before 6:30/5:00 but no earlier than grace cutoff (6:15/4:45)
+	mandatory_out = get_time(rules["full_day_out_by"])
+	grace_early_out = get_time(
+		SATURDAY_EARLY_EXIT_BEFORE if is_saturday(attendance_date) else WEEKDAY_EARLY_EXIT_BEFORE
+	)
+	early_exit = 1 if grace_early_out <= out_t < mandatory_out else 0
 
 	return late_entry, early_exit
 
@@ -124,6 +139,8 @@ def get_violation_reason(in_time, out_time, attendance_date):
 	out_t = get_time(out_time)
 	late_entry, early_exit = check_late_entry_early_exit(in_time, out_time, attendance_date)
 
+	if late_entry and early_exit:
+		return f"Late Entry (After {LATE_ENTRY_AFTER[:5]} AM) and Early Leaving"
 	if late_entry:
 		return f"Late Entry (After {LATE_ENTRY_AFTER[:5]} AM)"
 	if early_exit:
@@ -147,14 +164,24 @@ def compute_head_office_status(attendance_date, logs, leave_application=None):
 	final_status = "Absent"
 	final_half_day_status = ""
 
-	if working_hours >= rules["full_day_hours"] and out_time >= get_time(rules["full_day_out_by"]):
+	mandatory_out = get_time(rules["full_day_out_by"])
+	grace_early_out = get_time(
+		SATURDAY_EARLY_EXIT_BEFORE if is_saturday(attendance_date) else WEEKDAY_EARLY_EXIT_BEFORE
+	)
+
+	# Full day Present: enough hours + on-time OR within 15-min early grace (uses 1 of 3/month)
+	if working_hours >= rules["full_day_hours"] and (
+		out_time >= mandatory_out or (early_exit and out_time >= grace_early_out)
+	):
 		final_status = "Present"
 		final_half_day_status = ""
 	elif working_hours >= rules["min_half_day_hours"]:
 		is_timing_ok = False
 		if in_time <= get_time(rules["core_in_by"]) and out_time >= get_time(rules["first_half_out_by"]):
 			is_timing_ok = True
-		elif in_time <= get_time(rules["second_half_in_by"]) and out_time >= get_time(rules["full_day_out_by"]):
+		elif in_time <= get_time(rules["second_half_in_by"]) and (
+			out_time >= mandatory_out or (grace_early_out <= out_time < mandatory_out)
+		):
 			is_timing_ok = True
 
 		if is_timing_ok:
