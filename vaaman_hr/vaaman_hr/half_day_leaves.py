@@ -1,213 +1,135 @@
-
-# import frappe
-# from frappe.utils import getdate, get_time, flt, time_diff_in_hours
-
-# def validate_half_day_attendance(doc, method=None):
-
-#     if doc.status == "Half Day":
-
-#         #  Fetch Checkin Logs
-#         logs = frappe.get_all(
-#             "Employee Checkin",
-#             filters={
-#                 "employee": doc.employee,
-#                 "time": [
-#                     "between",
-#                     [
-#                         str(doc.attendance_date) + " 00:00:00",
-#                         str(doc.attendance_date) + " 23:59:59",
-#                     ],
-#                 ],
-#             },
-#             fields=["time", "log_type"],
-#             order_by="time asc",
-#         )
-
-#         working_hours = 0
-#         in_time = None
-#         out_time = None
-
-#         #  Session-wise calculation
-#         last_in = None
-        
-#         for log in logs:
-#             if log.log_type == "IN":
-#                 last_in = log.time
-
-#             elif log.log_type == "OUT" and last_in:
-#                 working_hours += time_diff_in_hours(log.time, last_in)
-#                 last_in = None
-
-#         if logs:
-#             in_time = logs[0].time
-#             out_time = logs[-1].time
-
-            
-
-#         # Set values
-#         doc.in_time = in_time
-#         doc.out_time = out_time
-#         doc.working_hours = flt(working_hours)
-
-#         # Date & Day
-#         attendance_date = getdate(doc.attendance_date)
-#         is_saturday = attendance_date.weekday() == 5
-
-#         act_in = get_time(in_time) if in_time else None
-#         act_out = get_time(out_time) if out_time else None
-
-#         # First / Second Half Detection
-#         is_first_half = act_in and act_in <= get_time("12:00:00")
-
-#         # Minimum Hours
-#         min_hours = 4.0 if is_saturday else 4.5
-
-#         status_ok = False
-#         error_msg = ""
-    
-        
-
-#         # No Punch
-#         if working_hours == 0:
-#             error_msg = "No Punches found."
-
-#         # Less Hours
-#         elif working_hours < min_hours:
-#             error_msg = f"Working Hours ({round(working_hours, 2)}) less than required {min_hours}"
-
-#         else:
-           
-#             #  FIRST HALF LOGIC
-#             if is_first_half:
-
-#                 if not is_saturday:
-                   
-#                     status_ok = True
-
-#                 else:
-                   
-#                     if act_out and act_out >= get_time("14:00:00"):
-#                         status_ok = True
-#                     else:
-#                         error_msg = "Saturday first half logout must be after 2:00 PM"
-
-           
-#             # SECOND HALF LOGIC
-          
-#             else:
-
-#                 if not is_saturday:
-#                     #  Mon–Fri → logout ≥ 6:30 PM
-#                     if act_out and act_out >= get_time("18:30:00"):
-#                         status_ok = True
-#                     else:
-#                         error_msg = "Must logout after 6:30 PM"
-
-#                 else:
-#                     # Saturday → logout ≥ 5 PM
-#                     if act_out and act_out >= get_time("17:00:00"):
-#                         status_ok = True
-#                     else:
-#                         error_msg = "Saturday logout must be after 5:00 PM"
-
-#         #  Final Status
-#         if status_ok:
-#             doc.half_day_status = "Present"
-#         else:
-#             doc.half_day_status = "Absent"
-#             if error_msg:
-#                 frappe.msgprint(error_msg)
-
-#         #  Save safely (NULL error avoid)
-#         doc.db_set({
-#             "in_time": doc.in_time,
-#             "out_time": doc.out_time,
-#             "working_hours": doc.working_hours or 0,
-#             "half_day_status": doc.half_day_status
-#         })
-
-
-
 import frappe
-from frappe.utils import getdate, get_time, flt, time_diff_in_hours
+from frappe.utils import flt, today
+
+from vaaman_hr.vaaman_hr.head_office_policy import (
+	HEAD_OFFICE_BRANCH,
+	calc_working_hours,
+	compute_head_office_status,
+	get_checkin_logs,
+	is_head_office_employee,
+)
+
+
+def apply_attendance_status(doc, working_hours, status, half_day_status, logs, late_entry=0, early_exit=0):
+	in_dt = logs[0].time if logs else None
+	out_dt = logs[-1].time if logs else None
+
+	values = {
+		"working_hours": flt(working_hours),
+		"status": status,
+		"half_day_status": half_day_status or "",
+		"late_entry": late_entry,
+		"early_exit": early_exit,
+	}
+	if in_dt:
+		values["in_time"] = in_dt
+	if out_dt:
+		values["out_time"] = out_dt
+
+	frappe.db.set_value("Attendance", doc.name, values, update_modified=False)
+	doc.working_hours = flt(working_hours)
+	doc.status = status
+	doc.half_day_status = half_day_status or ""
+	doc.late_entry = late_entry
+	doc.early_exit = early_exit
+
 
 def validate_half_day_attendance(doc, method=None):
+	if not is_head_office_employee(doc.employee):
+		return
 
-    logs = frappe.get_all("Employee Checkin", filters={
-        "employee": doc.employee,
-        "time": ["between", [str(doc.attendance_date) + " 00:00:00", str(doc.attendance_date) + " 23:59:59"]]
-    }, fields=["time", "log_type"], order_by="time asc")
+	if doc.leave_application:
+		logs = get_checkin_logs(doc.employee, doc.attendance_date)
+		values = {"late_entry": 0, "early_exit": 0}
+		if logs:
+			values["working_hours"] = calc_working_hours(logs)
+			doc.working_hours = values["working_hours"]
+		frappe.db.set_value("Attendance", doc.name, values, update_modified=False)
+		doc.late_entry = 0
+		doc.early_exit = 0
+		return
 
-    if not logs:
-        return
+	logs = get_checkin_logs(doc.employee, doc.attendance_date)
+	if not logs:
+		return
 
-    # 2. Calculation of Working Hours
-    working_hours = 0
-    last_in = None
-    for log in logs:
-        if log.log_type == "IN":
-            last_in = log.time
-        elif log.log_type == "OUT" and last_in:
-            working_hours += time_diff_in_hours(log.time, last_in)
-            last_in = None
+	working_hours, status, half_day_status, late_entry, early_exit = compute_head_office_status(
+		doc.attendance_date, logs, doc.leave_application
+	)
+	if status is None:
+		return
 
-    
-    in_time = get_time(logs[0].time)
-    out_time = get_time(logs[-1].time)
-    attendance_date = getdate(doc.attendance_date)
-    is_saturday = attendance_date.weekday() == 5
-    
-    min_hd_hours = 4.0 if is_saturday else 4.5
-    full_day_hours = 7.0 if is_saturday else 8.5
-    
-    final_status = "Absent"
-    final_half_day_status = ""
+	apply_attendance_status(
+		doc, working_hours, status, half_day_status, logs, late_entry, early_exit
+	)
 
-  
-    # CASE A: Full Day Present
-    if working_hours >= full_day_hours:
-        final_status = "Present"
-        final_half_day_status = ""
 
-    # CASE B: Half Day Eligibility (Hours + Timing Check)
-    elif working_hours >= min_hd_hours:
-        is_timing_ok = False
-        
-        # 1st Half: In <= 10:00 AM & Out >= 02:30 PM
-        if in_time <= get_time("10:05:00") and out_time >= get_time("14:30:00"):
-            is_timing_ok = True
-            
-        # 2nd Half: In <= 01:30 PM & Out >= 06:30 PM (Sat: 05:00 PM)
-        elif in_time <= get_time("13:35:00"):
-            target_out = "17:00:00" if is_saturday else "18:30:00"
-            if out_time >= get_time(target_out):
-                is_timing_ok = True
+@frappe.whitelist()
+def recalculate_head_office_attendance(from_date=None, to_date=None, dry_run=False):
+	"""Recalculate Head Office attendance status from check-in logs."""
+	from_date = from_date or "2026-01-01"
+	to_date = to_date or today()
+	dry_run = frappe.parse_json(dry_run) if isinstance(dry_run, str) else dry_run
 
-        if is_timing_ok:
-            final_status = "Half Day"
-            final_half_day_status = "Present"
-        else:
-           
-            final_status = "Absent"
-            final_half_day_status = ""
+	attendance_names = frappe.db.sql(
+		"""
+		SELECT a.name
+		FROM `tabAttendance` a
+		INNER JOIN `tabEmployee` e ON e.name = a.employee
+		WHERE e.branch = %(branch)s
+			AND a.docstatus = 1
+			AND a.attendance_date BETWEEN %(from_date)s AND %(to_date)s
+			AND a.status NOT IN ('On Leave', 'Holiday', 'Weekly Off', 'Work From Home')
+			AND (a.leave_application IS NULL OR a.leave_application = '')
+		ORDER BY a.attendance_date
+		""",
+		{"branch": HEAD_OFFICE_BRANCH, "from_date": from_date, "to_date": to_date},
+		pluck=True,
+	)
 
-    # CASE C: Less than 4.5 Hours
-    else:
-        if doc.leave_application:
-            final_status = "Half Day"
-            final_half_day_status = "Absent"
-        else:
-            final_status = "Absent"
-            final_half_day_status = ""
+	updated = 0
+	skipped = 0
+	changes = []
 
-    frappe.db.set_value("Attendance", doc.name, {
-        "working_hours": flt(working_hours),
-        "status": final_status,
-        "half_day_status": final_half_day_status
-    }, update_modified=False)
+	for name in attendance_names:
+		att = frappe.get_doc("Attendance", name)
+		logs = get_checkin_logs(att.employee, att.attendance_date)
+		if not logs:
+			skipped += 1
+			continue
 
-   
-    doc.working_hours = flt(working_hours)
-    doc.status = final_status
-    doc.half_day_status = final_half_day_status
+		working_hours, status, half_day_status, late_entry, early_exit = compute_head_office_status(
+			att.attendance_date, logs
+		)
+		if status is None:
+			skipped += 1
+			continue
 
+		old = (
+			att.status,
+			att.half_day_status or "",
+			flt(att.working_hours),
+			att.late_entry or 0,
+			att.early_exit or 0,
+		)
+		new = (status, half_day_status or "", flt(working_hours), late_entry, early_exit)
+		if old != new:
+			changes.append({"name": name, "date": str(att.attendance_date), "old": old, "new": new})
+			if not dry_run:
+				apply_attendance_status(
+					att, working_hours, status, half_day_status, logs, late_entry, early_exit
+				)
+			updated += 1
+
+	if not dry_run:
+		frappe.db.commit()
+
+	return {
+		"from_date": from_date,
+		"to_date": to_date,
+		"scanned": len(attendance_names),
+		"updated": updated,
+		"skipped": skipped,
+		"dry_run": dry_run,
+		"sample_changes": changes[:25],
+	}

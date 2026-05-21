@@ -1,102 +1,158 @@
-
 import frappe
-from frappe.utils import getdate, get_time
+from frappe.utils import getdate
 from collections import defaultdict
 
+from vaaman_hr.vaaman_hr.head_office_policy import (
+	ALLOWED_LATE_EARLY_PER_MONTH,
+	check_late_entry_early_exit,
+	get_violation_reason,
+	has_approved_half_day_leave,
+	head_office_branch_condition,
+)
+
+
+def sync_late_entry_flags(from_date="2026-04-01"):
+	"""Set late_entry / early_exit on Head Office Present attendance from in/out times."""
+	records = frappe.db.sql(
+		f"""
+		SELECT att.name, att.employee, att.attendance_date, att.in_time, att.out_time,
+			att.late_entry, att.early_exit
+		FROM `tabAttendance` att
+		INNER JOIN `tabEmployee` e ON e.name = att.employee
+		WHERE att.docstatus = 1
+			AND att.attendance_date >= %(from_date)s
+			AND {head_office_branch_condition("e")}
+			AND att.status = 'Present'
+			AND att.in_time IS NOT NULL
+			AND att.out_time IS NOT NULL
+		""",
+		{"from_date": from_date},
+		as_dict=True,
+	)
+
+	updated = 0
+	for record in records:
+		if has_approved_half_day_leave(record.employee, record.attendance_date):
+			late_entry, early_exit = 0, 0
+		else:
+			late_entry, early_exit = check_late_entry_early_exit(
+				record.in_time, record.out_time, record.attendance_date
+			)
+
+		if (record.late_entry or 0) != late_entry or (record.early_exit or 0) != early_exit:
+			frappe.db.set_value(
+				"Attendance",
+				record.name,
+				{"late_entry": late_entry, "early_exit": early_exit},
+				update_modified=False,
+			)
+			updated += 1
+
+	if updated:
+		frappe.db.commit()
+
+	return updated
+
+
 def process_attendance_policy():
-    # Fetch attendance records for late entry
-    
-    attendance_records = frappe.db.sql("""
-        SELECT att.name, att.employee, att.attendance_date, att.in_time, att.out_time, att.attendance_request
-        FROM `tabAttendance` att
-        WHERE att.status = 'Present'
-        AND att.docstatus = 1
-        AND att.attendance_date >= '2026-04-01'
-        AND att.custom_branch = 'Head Office'
-        AND NOT EXISTS (
-                SELECT la.name FROM `tabLeave Application` la 
-                WHERE la.employee = att.employee 
-                AND la.attendance_date = att.attendance_date 
-                AND la.status = 'Approved' 
-                AND la.half_day = 1
-            )
-        AND (
-                TIME(att.in_time) > '10:15:00' 
-                OR (DAYOFWEEK(att.attendance_date) BETWEEN 2 AND 6 AND TIME(att.out_time) < '18:15:00')
-                OR (DAYOFWEEK(att.attendance_date) = 7 AND TIME(att.out_time) < '17:00:00')
-            )
-        ORDER BY att.employee, att.attendance_date
-    """, as_dict=True)
+	"""Daily job: sync flags, then mark 4th+ late/early in a month as Absent."""
+	from_date = "2026-04-01"
+	sync_late_entry_flags(from_date)
 
-    print(f"Total records found: {len(attendance_records)}")
+	attendance_records = frappe.db.sql(
+		f"""
+		SELECT att.name, att.employee, att.attendance_date, att.in_time, att.out_time,
+			att.attendance_request
+		FROM `tabAttendance` att
+		INNER JOIN `tabEmployee` e ON e.name = att.employee
+		WHERE att.status = 'Present'
+			AND att.docstatus = 1
+			AND att.attendance_date >= %(from_date)s
+			AND {head_office_branch_condition("e")}
+			AND (att.late_entry = 1 OR att.early_exit = 1)
+		ORDER BY att.employee, att.attendance_date
+		""",
+		{"from_date": from_date},
+		as_dict=True,
+	)
 
-    # Group by employee and then by month
-    employee_monthly_late = defaultdict(lambda: defaultdict(list))
+	# Exclude approved half-day leave dates
+	attendance_records = [
+		r
+		for r in attendance_records
+		if not has_approved_half_day_leave(r.employee, r.attendance_date)
+	]
 
-    for record in attendance_records:
-        print(f"Processing: {record['employee']} on {record['attendance_date']}")
-        date_obj = getdate(record["attendance_date"])
-        month_key = f"{date_obj.year}-{date_obj.month:02d}"
-        employee_monthly_late[record["employee"]][month_key].append(record)
+	employee_monthly_late = defaultdict(lambda: defaultdict(list))
+	for record in attendance_records:
+		date_obj = getdate(record.attendance_date)
+		month_key = f"{date_obj.year}-{date_obj.month:02d}"
+		employee_monthly_late[record.employee][month_key].append(record)
 
-    # Process each employee's monthly records
-    for employee, month_data in employee_monthly_late.items():
-        for month, records in month_data.items():
-            if len(records) <= 3:
-                continue 
+	for employee, month_data in employee_monthly_late.items():
+		for month, records in month_data.items():
+			if len(records) <= ALLOWED_LATE_EARLY_PER_MONTH:
+				continue
 
-            for record in records[3:]:
-                if record["attendance_request"]:
-                    continue 
+			for record in records[ALLOWED_LATE_EARLY_PER_MONTH:]:
+				if record.attendance_request:
+					continue
 
-                try:
-                    in_time_val = get_time(record["in_time"])
-                    out_time_val = get_time(record["out_time"])
-                    is_sat = getdate(record["attendance_date"]).strftime('%a') == 'Sat'
-                    
-                    if in_time_val > get_time("10:15:00"):
-                        reason = "Late Entry (After 10:15 AM)"
-                    elif is_sat and out_time_val < get_time("17:00:00"):
-                        reason = "Early Leaving (Saturday before 05:00 PM)"
-                    else:
-                        reason = "Early Leaving (Before 06:15 PM)"
-                        
-                    original = frappe.get_doc("Attendance", record["name"])
+				try:
+					reason = get_violation_reason(
+						record.in_time, record.out_time, record.attendance_date
+					)
+					if not reason:
+						continue
 
-                    if original.docstatus == 1:
-                        original.cancel()
+					original = frappe.get_doc("Attendance", record.name)
+					if original.docstatus == 1:
+						original.cancel()
 
-                    amended_att = frappe.copy_doc(original)
-                    amended_att.docstatus = 1
-                    amended_att.status = "Absent"
-                    amended_att.amended_from = original.name
-                    amended_att.save(ignore_permissions=True)
+					amended_att = frappe.copy_doc(original)
+					amended_att.docstatus = 1
+					amended_att.status = "Absent"
+					amended_att.late_entry = 0
+					amended_att.early_exit = 0
+					amended_att.amended_from = original.name
+					amended_att.save(ignore_permissions=True)
 
-                    amended_att.add_comment("Comment", f"Marked as Absent due to 4th or subsequent late entry ({reason}) in the same month.")
-                    
-                    # Log entry in custom DocType
-                    frappe.get_doc({
-                        "doctype": "Attendance Policy Log",
-                        "employee": original.employee,
-                        "attendance": amended_att.name,
-                        "attendance_date": amended_att.attendance_date,
-                        "action_taken": "Converted to Absent",
-                        "remarks": f"Exceeded 3 occurrences (Late/Early). Current violation: {reason}"
-                    }).insert(ignore_permissions=True)
+					amended_att.add_comment(
+						"Comment",
+						f"Marked as Absent due to {ALLOWED_LATE_EARLY_PER_MONTH + 1}th or subsequent "
+						f"late/early violation ({reason}) in {month}.",
+					)
 
-                    user_id = frappe.db.get_value("Employee", employee, "user_id")
-                    if user_id:
-                        frappe.sendmail(
-                            recipients=[user_id],
-                            subject="Attendance Policy Violation",
-                            message=f"You have been marked as Absent on {amended_att.attendance_date} "
-                                    f"for exceeding 3 allowed occasions of Late Entry or Early Leaving in {month}."
-                        )
+					frappe.get_doc(
+						{
+							"doctype": "Attendance Policy Log",
+							"employee": original.employee,
+							"attendance": amended_att.name,
+							"attendance_date": amended_att.attendance_date,
+							"action_taken": "Converted to Absent",
+							"remarks": (
+								f"Exceeded {ALLOWED_LATE_EARLY_PER_MONTH} allowed late/early occasions. "
+								f"Violation: {reason}"
+							),
+						}
+					).insert(ignore_permissions=True)
 
-                    frappe.db.commit()
+					user_id = frappe.db.get_value("Employee", employee, "user_id")
+					if user_id:
+						frappe.sendmail(
+							recipients=[user_id],
+							subject="Attendance Policy Violation",
+							message=(
+								f"You have been marked as Absent on {amended_att.attendance_date} "
+								f"for exceeding {ALLOWED_LATE_EARLY_PER_MONTH} allowed occasions of "
+								f"late entry or early leaving in {month}."
+							),
+						)
 
-                except Exception as e:
-                    frappe.log_error(
-                        f"Failed to amend attendance for {employee} on {record['attendance_date']}: {str(e)}",
-                        "Attendance Policy"
-                    )
+					frappe.db.commit()
+
+				except Exception as e:
+					frappe.log_error(
+						f"Failed to amend attendance for {employee} on {record.attendance_date}: {e!s}",
+						"Attendance Policy",
+					)
