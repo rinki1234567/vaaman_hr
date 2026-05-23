@@ -2,7 +2,6 @@ import frappe
 from frappe.utils import flt
 
 from vaaman_hr.vaaman_hr.head_office_policy import (
-	calc_working_hours,
 	compute_head_office_status,
 	get_checkin_logs,
 	is_exempt_from_head_office_policy,
@@ -38,19 +37,8 @@ def validate_half_day_attendance(doc, method=None):
 	if not is_head_office_employee(doc.employee):
 		return
 
-	# Attendance Request (e.g. On Duty → Present) must not be overridden by punch logic
+	# Attendance Request or Leave Application — do not override status / late / early
 	if is_exempt_from_head_office_policy(doc):
-		return
-
-	if doc.leave_application:
-		logs = get_checkin_logs(doc.employee, doc.attendance_date)
-		values = {"late_entry": 0, "early_exit": 0}
-		if logs:
-			values["working_hours"] = calc_working_hours(logs)
-			doc.working_hours = values["working_hours"]
-		frappe.db.set_value("Attendance", doc.name, values, update_modified=False)
-		doc.late_entry = 0
-		doc.early_exit = 0
 		return
 
 	logs = get_checkin_logs(doc.employee, doc.attendance_date)

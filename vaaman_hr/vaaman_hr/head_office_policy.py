@@ -56,10 +56,52 @@ def head_office_branch_condition(alias="e"):
 
 
 def is_exempt_from_head_office_policy(attendance):
-	"""Attendance Request overrides policy — do not recalculate status or late/early flags."""
+	"""Skip policy when marked via Attendance Request or Leave Application."""
 	if isinstance(attendance, str):
-		return bool(frappe.db.get_value("Attendance", attendance, "attendance_request"))
-	return bool(getattr(attendance, "attendance_request", None))
+		row = frappe.db.get_value(
+			"Attendance",
+			attendance,
+			["attendance_request", "leave_application"],
+			as_dict=True,
+		)
+		return bool(row and (row.attendance_request or row.leave_application))
+	return bool(
+		getattr(attendance, "attendance_request", None)
+		or getattr(attendance, "leave_application", None)
+	)
+
+
+def get_expected_status_from_leave(leave_application, attendance_date, employee=None):
+	"""Status from approved Leave Application (not punch policy)."""
+	from frappe.utils import getdate
+
+	la = frappe.get_doc("Leave Application", leave_application)
+	att_date = getdate(attendance_date)
+
+	if la.half_day and getdate(la.half_day_date) == att_date:
+		half_day_status = "Absent"
+		if employee:
+			logs = get_checkin_logs(employee, att_date)
+			if logs:
+				wh, st, hds, _, _ = compute_head_office_status(att_date, logs)
+				if st == "Half Day" and hds == "Present":
+					half_day_status = "Present"
+		return "Half Day", half_day_status
+
+	if getdate(la.from_date) <= att_date <= getdate(la.to_date):
+		return "On Leave", ""
+
+	return None, None
+
+
+def get_expected_status_from_attendance_request(attendance_request, attendance_date):
+	"""Status from approved Attendance Request."""
+	from hrms.hr.doctype.attendance_request.attendance_request import AttendanceRequest
+
+	doc = frappe.get_doc("Attendance Request", attendance_request)
+	status = AttendanceRequest.get_attendance_status(doc, attendance_date)
+	half_day_status = "Absent" if status == "Half Day" else ""
+	return status, half_day_status
 
 
 def has_approved_half_day_leave(employee, attendance_date):

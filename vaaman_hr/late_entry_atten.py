@@ -24,6 +24,7 @@ def sync_late_entry_flags(from_date="2026-04-01"):
 			AND {head_office_branch_condition("e")}
 			AND att.status = 'Present'
 			AND (att.attendance_request IS NULL OR att.attendance_request = '')
+			AND (att.leave_application IS NULL OR att.leave_application = '')
 			AND att.in_time IS NOT NULL
 			AND att.out_time IS NOT NULL
 		""",
@@ -72,6 +73,7 @@ def process_attendance_policy():
 			AND {head_office_branch_condition("e")}
 			AND (att.late_entry = 1 OR att.early_exit = 1)
 			AND (att.attendance_request IS NULL OR att.attendance_request = '')
+			AND (att.leave_application IS NULL OR att.leave_application = '')
 		ORDER BY att.employee, att.attendance_date
 		""",
 		{"from_date": from_date},
