@@ -192,7 +192,7 @@ def create_pi_as_admin(
 
         pi_doc.flags.ignore_mandatory = True
         pi_doc.custom_auto_generated = 1
-        pi.doc.purchase_order_number=pr_doc.custom_purchase_order_number
+        pi_doc.purchase_order_number=pr_doc.custom_purchase_order_number
         if (
             pr_doc.name.startswith("SR")
             and (
