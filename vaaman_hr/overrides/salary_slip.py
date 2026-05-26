@@ -1,6 +1,7 @@
 from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
 import frappe
 from frappe.utils import getdate, flt, cint
+from frappe.query_builder.functions import Count
 from packaging import version
 from datetime import timedelta
 
@@ -189,19 +190,18 @@ class CustomSalarySlip(ERPNextSalarySlip):
             fields=[
                 "attendance_date",
                 "status",
-                "half_day_status",
             ],
         )
 
         attendance_by_date = {
-            getdate(row.attendance_date): (row.status, row.half_day_status)
+            getdate(row.attendance_date): row.status
             for row in attendance_rows
         }
 
-        # ---------- PAYROLL SETTING ----------
-        consider_unmarked_as = frappe.db.get_single_value(
-            "Payroll Settings", "consider_unmarked_attendance_as"
-        )
+        # ---------- PAYROLL SETTINGS ----------
+        payroll_settings = frappe.db.get_singles_dict("Payroll Settings")
+        consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")
+        daily_wages_fraction_for_half_day = flt(payroll_settings.get("daily_wages_fraction_for_half_day")) or 0.5
 
         # ---------- ABSENT COUNT ----------
         absent_days = 0
@@ -209,19 +209,37 @@ class CustomSalarySlip(ERPNextSalarySlip):
         current_date = period_start
         while current_date <= period_end:
             is_holiday = current_date in holidays
-            record = attendance_by_date.get(current_date)
-            status, half_day_status = record if record else (None, None)
+            status = attendance_by_date.get(current_date)
 
             if status == "Absent":
                 if override_absent_on_holiday or not is_holiday:
                     absent_days += 1
-            elif status == "Half Day" and half_day_status == "Absent":
-                if override_absent_on_holiday or not is_holiday:
-                    absent_days += 0.5
             elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
                 absent_days += 1
 
             current_date += timedelta(days=1)
+
+        # ---------- HALF DAY ABSENT (HRMS DEFAULT LOGIC) ----------
+        Attendance = frappe.qb.DocType("Attendance")
+        half_day_query = (
+            frappe.qb.from_(Attendance)
+            .select(Count("*"))
+            .where(
+                (Attendance.employee == self.employee)
+                & (Attendance.attendance_date.between(period_start, period_end))
+                & (Attendance.docstatus == 1)
+                & (Attendance.status == "Half Day")
+                & (Attendance.half_day_status == "Absent")
+            )
+        )
+
+        if not override_absent_on_holiday and holidays:
+            half_day_query = half_day_query.where(
+                Attendance.attendance_date.notin(holidays)
+            )
+
+        half_absent_days = half_day_query.run()[0][0]
+        absent_days += half_absent_days * daily_wages_fraction_for_half_day
 
         # ---------- FINAL VALUES ----------
         self.total_working_days = total_working_days
