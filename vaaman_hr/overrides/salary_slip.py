@@ -1,7 +1,9 @@
 from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
 import frappe
 from frappe.utils import getdate, flt, cint
+from frappe.query_builder.functions import Count
 from packaging import version
+from datetime import timedelta
 
 # ==========================================
 # VERSION DETECTION
@@ -196,18 +198,48 @@ class CustomSalarySlip(ERPNextSalarySlip):
             for row in attendance_rows
         }
 
+        # ---------- PAYROLL SETTINGS ----------
+        payroll_settings = frappe.db.get_singles_dict("Payroll Settings")
+        consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")
+        daily_wages_fraction_for_half_day = flt(payroll_settings.get("daily_wages_fraction_for_half_day")) or 0.5
+
         # ---------- ABSENT COUNT ----------
         absent_days = 0
 
-        for current_date, status in attendance_by_date.items():
-
-            if status != "Absent":
-                continue
-
+        current_date = period_start
+        while current_date <= period_end:
             is_holiday = current_date in holidays
+            status = attendance_by_date.get(current_date)
 
-            if override_absent_on_holiday or not is_holiday:
+            if status == "Absent":
+                if override_absent_on_holiday or not is_holiday:
+                    absent_days += 1
+            elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
                 absent_days += 1
+
+            current_date += timedelta(days=1)
+
+        # ---------- HALF DAY ABSENT (HRMS DEFAULT LOGIC) ----------
+        Attendance = frappe.qb.DocType("Attendance")
+        half_day_query = (
+            frappe.qb.from_(Attendance)
+            .select(Count("*"))
+            .where(
+                (Attendance.employee == self.employee)
+                & (Attendance.attendance_date.between(period_start, period_end))
+                & (Attendance.docstatus == 1)
+                & (Attendance.status == "Half Day")
+                & (Attendance.half_day_status == "Absent")
+            )
+        )
+
+        if not override_absent_on_holiday and holidays:
+            half_day_query = half_day_query.where(
+                Attendance.attendance_date.notin(holidays)
+            )
+
+        half_absent_days = half_day_query.run()[0][0]
+        absent_days += half_absent_days * daily_wages_fraction_for_half_day
 
         # ---------- FINAL VALUES ----------
         self.total_working_days = total_working_days
