@@ -194,7 +194,7 @@ def create_pi_as_admin(
         pi_doc.custom_auto_generated = 1
         pi_doc.purchase_order_number=pr_doc.custom_purchase_order_number
         if (
-            pr_doc.name.startswith("SR")
+            pr_doc.name.startswith("SR") or pr_doc.name.startswith("GR")
             and (
                 pr_doc.custom_purchase_order_number.startswith("PO/CP")
                 or pr_doc.custom_purchase_order_number.startswith("WO/CP")
