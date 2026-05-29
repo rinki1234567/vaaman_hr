@@ -1163,11 +1163,18 @@ def get_columns(filters: Filters) -> list[dict]:
                     },
                 
                 {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
+               
                 {
                     "label": _("Unmarked Days"),
                     "fieldname": "unmarked_days",
                     "fieldtype": "Float",
                     "width": 130,
+                },
+                {
+                    "label": _("Additional OT"),
+                    "fieldname": "additinal_ot",
+                    "fieldtype": "Float",
+                    "width": 140
                 },
             ]
         )
@@ -1199,7 +1206,7 @@ def get_columns(filters: Filters) -> list[dict]:
         "fieldtype": "Float",
         "width": 120,
         },
-          {"label": _("Total Leaves"), 
+        {"label": _("Total Leaves"), 
         "fieldname": "total_leaves",
         "fieldtype": "Float", 
         "width": 110
@@ -1294,7 +1301,14 @@ def get_columns(filters: Filters) -> list[dict]:
         "fieldtype": "Int",
         "width": 160
         },
-        {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150}
+        {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
+        {
+        "label": _("Additional OT"),
+        "fieldname": "additinal_ot",
+        "fieldtype": "Float",
+        "width": 140
+        },
+       
         ])
     return columns
 
@@ -1553,6 +1567,8 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
             row.update(leave_summary)
             row.update(entry_exits_summary)
             row["total_overtime"] = get_total_overtime(employee, filters)
+            row["additinal_ot"] = get_additional_ot(employee, filters)
+          
 
             records.append(row)
         else:
@@ -1695,8 +1711,7 @@ def get_attendance_status_for_detailed_view(
             h_status = get_holiday_status(day, holidays)
             day_leaves = list(set(leave_day_map.get(day, []))) # CL/SL list
             
-
-
+            
             
             # abbr = ""
             # if h_status == "Holiday":
@@ -1776,6 +1791,7 @@ def get_attendance_status_for_detailed_view(
             
             abbr = ""
             if day_att:
+                
                 m_leave_type = day_att.leave_type
                 m_leave_abbr = "SLZ" if m_leave_type == "Sick Leave - Zinc" else leave_type_abbr.get(m_leave_type, "L") if m_leave_type else ""
                 
@@ -1784,7 +1800,18 @@ def get_attendance_status_for_detailed_view(
                 
                 # Punch check
                 has_punch = True if day_att.in_time or day_att.out_time else False
-                if day_att.status == "Half Day":
+                
+                #######################################################################
+                # fist check if it's holiday and present/half day, then mark as H/P and count in PPH
+                if h_status == "Holiday" and day_att.status in ["Present", "Half Day"]:
+                    abbr = "H/P"
+                    t_p += 1.0
+                    t_pph += 1
+                    
+                #####################################################################################
+                
+                
+                elif day_att.status == "Half Day":
                     if len(day_leaves) > 1:
                         abbr = f"HD/{'/'.join(day_leaves)}"
                         t_l += 1.0
@@ -1838,11 +1865,15 @@ def get_attendance_status_for_detailed_view(
 
             else:
                 if h_status == "Holiday":
-                    abbr = "H/P" if day_att and day_att.status in ["Present", "Half Day"] else "H"
-                    if abbr == "H": 
-                        t_h += 1
-                    else: 
-                        t_pph += 1
+                    
+                    abbr = "H"
+                    t_h += 1
+                    # abbr = "H/P" if day_att and day_att.status in ["Present", "Half Day"] else "H"
+                    # if abbr == "H": 
+                        # t_h += 1
+                    # else: 
+                    #     t_pph += 1
+                    
                 elif h_status == "Weekly Off":
                     abbr = "WO"
                     t_wo += 1
@@ -1869,8 +1900,9 @@ def get_attendance_status_for_detailed_view(
             "pph": t_pph, 
             "unmarked_days": t_un ,
             "total_overtime": get_total_overtime(employee, filters),
+            "additinal_ot": get_additional_ot(employee, filters),    #new 
             "total_late_entries": get_entry_exits_summary(employee, filters).get("total_late_entries", 0),
-            "total_early_exits": get_entry_exits_summary(employee, filters).get("total_early_exits", 0)
+            "total_early_exits": get_entry_exits_summary(employee, filters).get("total_early_exits", 0),
         })
         attendance_values.append(row)
 
@@ -2048,7 +2080,19 @@ def get_total_overtime(employee: str, filters: Filters) -> float:
     return total or 0
 
 
+def get_additional_ot(employee, filters):
+    month_date = f"{filters.year}-{filters.month}-01"
 
+    total = frappe.db.sql("""
+        SELECT SUM(additinal_ot)
+        FROM `tabot adjustment item`
+        WHERE employee = %s
+          AND parent IN (
+              SELECT name
+              FROM `tabOT Adjustment`
+              WHERE docstatus = 1
+                AND month = %s
+          )
+    """, (employee, month_date))
 
-
-
+    return total[0][0] if total and total[0][0] else 0
