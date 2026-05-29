@@ -192,14 +192,11 @@ def create_pi_as_admin(
 
         pi_doc.flags.ignore_mandatory = True
         pi_doc.custom_auto_generated = 1
-        pi_doc.purchase_order_number=pr_doc.custom_purchase_order_number
-        if (
-            pr_doc.name.startswith("SR") or pr_doc.name.startswith("GR")
-            and (
-                pr_doc.custom_purchase_order_number.startswith("PO/CP")
-                or pr_doc.custom_purchase_order_number.startswith("WO/CP")
-            )
-        ):
+        pi_doc.purchase_order_number = pr_doc.custom_purchase_order_number
+        po_number = (pr_doc.custom_purchase_order_number or "").strip()
+        is_cp_po = po_number.startswith("PO/CP") or po_number.startswith("WO/CP")
+        is_sr_or_gr = pr_doc.name.startswith("SR") or pr_doc.name.startswith("GR")
+        if is_sr_or_gr and is_cp_po:
             pi_doc.naming_series = "PCP/.FY./.#####"
         else:
             pi_doc.naming_series = "PINV/.FY./.#####"
