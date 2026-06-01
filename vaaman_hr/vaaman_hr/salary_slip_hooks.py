@@ -27,3 +27,4 @@ def calculate_overtime_hours(doc, method):
     """, (doc.employee, doc.start_date, doc.end_date))[0][0] or 0
 
     doc.total_overtime_hours = overtime_import_ot + ot_adjustment_ot
+    doc.custom_rounded_gross_pay = round(doc.gross_pay or 0)

@@ -163,5 +163,64 @@
         "property_type": "Select",
         "__islocal": 1,
         "name": "Attendance-status-options"
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary Structure Assignment-custom_restricted_pf",
+        "fieldname": "custom_restricted_pf",
+        "fieldtype": "Check",
+        "label": "Restricted PF",
+        "insert_after": "currency",
+        "__islocal": 1,
+        "allow_on_submit": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary Structure Assignment-custom_pf_on_basic",
+        "fieldname": "custom_pf_on_basic",
+        "fieldtype": "Check",
+        "label": "PF on Basic",
+        "insert_after": "currency",
+        "__islocal": 1,
+        "allow_on_submit": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary Structure Assignment-custom_pf_on_gross",
+        "fieldname": "custom_pf_on_gross",
+        "fieldtype": "Check",
+        "label": "PF on Gross",
+        "insert_after": "currency",
+        "__islocal": 1,
+        "allow_on_submit": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Salary Slip",
+        "module": "Vaaman Hr",
+        "name": "Salary Slip-custom_paid_leaves",
+        "fieldname": "custom_paid_leaves",
+        "fieldtype": "Float",
+        "label": "Paid Leaves",        
+        "insert_after": "standard_weekly_off",
+        "__islocal": 1   
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Salary Slip",
+        "module": "Vaaman Hr",
+        "name": "Salary Slip-custom_rounded_gross_pay",
+        "fieldname": "custom_rounded_gross_pay",
+        "fieldtype": "Float",
+        "label": "Rounded Gross Pay",        
+        "insert_after": "gross_pay",
+        "__islocal": 1   
     }
+    
 ]
