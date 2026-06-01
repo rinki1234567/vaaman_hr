@@ -190,11 +190,13 @@ class CustomSalarySlip(ERPNextSalarySlip):
             fields=[
                 "attendance_date",
                 "status",
+                "leave_type",
+                "half_day_status",
             ],
         )
 
         attendance_by_date = {
-            getdate(row.attendance_date): row.status
+            getdate(row.attendance_date): row
             for row in attendance_rows
         }
 
@@ -209,7 +211,8 @@ class CustomSalarySlip(ERPNextSalarySlip):
         current_date = period_start
         while current_date <= period_end:
             is_holiday = current_date in holidays
-            status = attendance_by_date.get(current_date)
+            row = attendance_by_date.get(current_date)
+            status = row.status if row else None
 
             if status == "Absent":
                 if override_absent_on_holiday or not is_holiday:
@@ -240,6 +243,28 @@ class CustomSalarySlip(ERPNextSalarySlip):
 
         half_absent_days = half_day_query.run()[0][0]
         absent_days += half_absent_days * daily_wages_fraction_for_half_day
+
+        # ---------- PAID LEAVES ----------
+        PAID_LEAVE_TYPES = {
+            "Compensatory Off",
+            "Maternity Leave",
+            "Special Leave",
+            "Privilege Leave",
+            "Sick Leave",
+            "Casual Leave",
+            "Sick Leave - Zinc",
+            "Festival Leave",
+        }
+
+        paid_leaves = 0
+        for row in attendance_by_date.values():
+            if row.leave_type in PAID_LEAVE_TYPES:
+                if row.status == "On Leave":
+                    paid_leaves += 1
+                elif row.status == "Half Day":
+                    paid_leaves += 0.5
+
+        self.custom_paid_leaves = paid_leaves
 
         # ---------- FINAL VALUES ----------
         self.total_working_days = total_working_days
