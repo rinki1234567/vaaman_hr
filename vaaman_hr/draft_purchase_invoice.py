@@ -63,8 +63,9 @@
 
 import frappe
 from frappe import _
-from frappe.utils import get_link_to_form
+from frappe.utils import cint, get_link_to_form
 
+from erpnext.accounts.utils import get_fiscal_year
 from erpnext.stock.doctype.item.item import get_item_defaults
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
 from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
@@ -146,6 +147,41 @@ def _requires_item_master_expense_account(item_code):
     return True
 
 
+def _is_supplier_invoice_uniqueness_enabled():
+    return cint(
+        frappe.db.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")
+    )
+
+
+def _supplier_bill_no_exists(bill_no, supplier, company, posting_date, exclude_name=None):
+    """Same scope as ERPNext PurchaseInvoice.validate_supplier_invoice."""
+    fiscal_year = get_fiscal_year(posting_date, company=company, as_dict=True)
+    filters = {
+        "bill_no": bill_no,
+        "supplier": supplier,
+        "docstatus": ("<", 2),
+        "posting_date": ["between", [fiscal_year.year_start_date, fiscal_year.year_end_date]],
+    }
+    if exclude_name:
+        filters["name"] = ("!=", exclude_name)
+    return frappe.db.exists("Purchase Invoice", filters)
+
+
+def _get_unique_bill_no(base_bill_no, supplier, company, posting_date, exclude_name=None):
+    """Assign bill_no; suffix only when Accounts Settings requires per-supplier uniqueness."""
+    if not _is_supplier_invoice_uniqueness_enabled():
+        return base_bill_no
+
+    unique_bill_no = base_bill_no
+    counter = 1
+    while _supplier_bill_no_exists(
+        unique_bill_no, supplier, company, posting_date, exclude_name
+    ):
+        unique_bill_no = f"{base_bill_no}-{counter}"
+        counter += 1
+    return unique_bill_no
+
+
 def _set_expense_accounts_on_pi(pi_doc, pr_doc):
     for pi_item in pi_doc.items:
         if pi_item.expense_account:
@@ -180,14 +216,12 @@ def create_pi_as_admin(
 
         if supplier_delivery_note:
             base_bill_no = supplier_delivery_note.strip()
-            unique_bill_no = base_bill_no
-            counter = 1
-
-            while frappe.db.exists("Purchase Invoice", {"bill_no": unique_bill_no}):
-                unique_bill_no = f"{base_bill_no}-{counter}"
-                counter += 1
-
-            pi_doc.bill_no = unique_bill_no
+            pi_doc.bill_no = _get_unique_bill_no(
+                base_bill_no,
+                pi_doc.supplier,
+                pi_doc.company,
+                pi_doc.posting_date or posting_date,
+            )
             pi_doc.bill_date = supplier_delivery_note_date or posting_date
 
         pi_doc.flags.ignore_mandatory = True
