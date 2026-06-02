@@ -199,7 +199,8 @@ class CustomSalarySlip(ERPNextSalarySlip):
             getdate(row.attendance_date): row
             for row in attendance_rows
         }
-
+        
+        
         # ---------- PAYROLL SETTINGS ----------
         payroll_settings = frappe.db.get_singles_dict("Payroll Settings")
         consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")

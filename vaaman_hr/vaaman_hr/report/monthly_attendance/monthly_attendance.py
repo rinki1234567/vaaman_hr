@@ -1260,7 +1260,7 @@ def get_columns(filters: Filters) -> list[dict]:
         "width": 130
         },
         {
-        "label": _("Special Leave"), # <--- Ye naya column header
+        "label": _("Special Leave"), 
         "fieldname": "special_leave",
         "fieldtype": "Float",
         "width": 130
@@ -1696,7 +1696,7 @@ def get_attendance_status_for_detailed_view(
             "employee": employee, "docstatus": 1,
             "attendance_date": ["between", [f"{filters.year}-{filters.month}-01", f"{filters.year}-{filters.month}-{total_days}"]]
         },
-        fields=["attendance_date", "status", "half_day_status", "leave_type", "leave_application", "in_time", "out_time"]
+        fields=["attendance_date", "status", "half_day_status", "leave_type", "leave_application", "in_time", "out_time", "attendance_request"]
     )
     att_map = {getdate(d.attendance_date).day: d for d in att_info}
 
@@ -1810,43 +1810,56 @@ def get_attendance_status_for_detailed_view(
                     
                 #####################################################################################
                 
-                
+                # check attendance from attendance request
                 elif day_att.status == "Half Day":
-                    if len(day_leaves) > 1:
-                        abbr = f"HD/{'/'.join(day_leaves)}"
-                        t_l += 1.0
-                        if lt_key: 
-                            row[lt_key] = row.get(lt_key, 0.0) + 1.0
-                    elif has_punch:
-                        if day_att.half_day_status == "Present":
-                            t_p += 0.5
-                            if day_att.leave_application or m_leave_abbr:
-                                abbr = f"HD/P/{m_leave_abbr}"
-                                t_l += 0.5
-                                if lt_key: 
-                                    row[lt_key] = row.get(lt_key, 0.0) + 0.5
-                            else:
-                                abbr = "HD/P/A"
-                                t_a += 0.5
-                        else:
-                            abbr = f"HD/{m_leave_abbr}/A" if (day_att.leave_application or m_leave_abbr) else "A"
-                            t_a += 0.5 if (day_att.leave_application or m_leave_abbr) else 1.0
-                            t_l += 0.5 if (day_att.leave_application or m_leave_abbr) else 0.0
-                            if lt_key and (day_att.leave_application or m_leave_abbr): 
-                                row[lt_key] = row.get(lt_key, 0.0) + 0.5
-                    else:
-                        status_part = "P" if day_att.half_day_status == "Present" else "A"
-                        if m_leave_abbr:
-                            abbr = f"HD/{m_leave_abbr}/{status_part}"
+                    if day_att.attendance_request:
+                        t_p += 0.5
+                        if day_att.leave_application or m_leave_abbr:
+                            abbr = f"HD/P/{m_leave_abbr}"
                             t_l += 0.5
                             if lt_key:
                                 row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                                
                         else:
-                            abbr = f"HD/{status_part}"
-                        if status_part == "P":
-                            t_p += 0.5
-                        else:
+                            abbr = "HD/P/A"
                             t_a += 0.5
+                    else:
+                        if len(day_leaves) > 1:
+                            abbr = f"HD/{'/'.join(day_leaves)}"
+                            t_l += 1.0
+                            if lt_key: 
+                                row[lt_key] = row.get(lt_key, 0.0) + 1.0
+                ###########################################################################        
+                        elif has_punch:
+                            if day_att.half_day_status == "Present":
+                                t_p += 0.5
+                                if day_att.leave_application or m_leave_abbr:
+                                    abbr = f"HD/P/{m_leave_abbr}"
+                                    t_l += 0.5
+                                    if lt_key: 
+                                        row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                                else:
+                                    abbr = "HD/P/A"
+                                    t_a += 0.5
+                            else:
+                                abbr = f"HD/{m_leave_abbr}/A" if (day_att.leave_application or m_leave_abbr) else "A"
+                                t_a += 0.5 if (day_att.leave_application or m_leave_abbr) else 1.0
+                                t_l += 0.5 if (day_att.leave_application or m_leave_abbr) else 0.0
+                                if lt_key and (day_att.leave_application or m_leave_abbr): 
+                                    row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                        else:
+                            status_part = "P" if day_att.half_day_status == "Present" else "A"
+                            if m_leave_abbr:
+                                abbr = f"HD/{m_leave_abbr}/{status_part}"
+                                t_l += 0.5
+                                if lt_key:
+                                    row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                            else:
+                                abbr = f"HD/{status_part}"
+                            if status_part == "P":
+                                t_p += 0.5
+                            else:
+                                t_a += 0.5
                 elif day_att.status == "On Leave":
                     abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
                     t_l += 1.0
