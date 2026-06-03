@@ -1862,6 +1862,7 @@ def get_attendance_status_for_detailed_view(
                                 t_p += 0.5
                             else:
                                 t_a += 0.5
+                                t_p += 0.5
                 elif day_att.status == "On Leave":
                     abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
                     t_l += 1.0
