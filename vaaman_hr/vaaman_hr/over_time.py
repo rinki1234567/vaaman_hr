@@ -1,47 +1,17 @@
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, getdate
-from frappe.utils.logger import set_log_level, get_logger
-
-set_log_level("DEBUG")
-logger = get_logger("compensatory_leave")
 
 
-# ---------------------------------------------------------
-# MAIN: Calculate Compensatory Leave (OverTime Import Hook)
-# ---------------------------------------------------------
 @frappe.whitelist()
 def calculate_compensatory_leave(doc, method):
-    """
-    Triggered on OverTime Import submit
-    Creates/updates Compensatory Off with 60 days validity from the day after OT.
-    """
-    try:
-        logger.info(f"Starting compensatory leave calculation for OverTime Import: {doc.name}")
-        logger.info(f"Total rows in overtime_import_details: {len(doc.overtime_import_details)}")
-
-        for idx, row in enumerate(doc.overtime_import_details, 1):
-            _create_comp_off_for_row(row, import_name=doc.name, row_idx=idx)
-
-        logger.info(f"Completed compensatory leave calculation for OverTime Import: {doc.name}")
-
-    except frappe.ValidationError:
-        logger.error(frappe.get_traceback(), "Validation Error in Compensatory Leave Calculation")
-        raise
-    except Exception:
-        logger.error(frappe.get_traceback(), "Compensatory Leave Calculation Error")
-        frappe.throw(_("An unexpected error occurred while calculating compensatory leave."))
+    """OverTime Import on_submit: credit comp-off with 60-day validity."""
+    for row in doc.overtime_import_details:
+        _create_comp_off_for_row(row, import_name=doc.name)
 
 
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
 def get_existing_allocation_for_date(employee, comp_leave_valid_from):
-    """
-    Find the active Leave Allocation for Compensatory Off.
-    Since we track 60-day expiry through ledger entries (not separate allocations),
-    we look for any active allocation that covers the period.
-    """
+    """Active Leave Allocation for Compensatory Off covering valid_from."""
     leave_allocation = frappe.db.sql(
         """
         SELECT name
@@ -64,6 +34,13 @@ def get_existing_allocation_for_date(employee, comp_leave_valid_from):
     if leave_allocation:
         return frappe.get_doc("Leave Allocation", leave_allocation[0].name)
     return None
+
+
+def get_comp_leave_validity_period(start_date):
+    """60-day window: valid_from is day after OT; valid_to is 59 days later."""
+    valid_from = add_days(getdate(start_date), 1)
+    valid_to = add_days(valid_from, 59)
+    return valid_from, valid_to
 
 
 def get_net_comp_off_credit(employee, comp_leave_valid_from):
@@ -112,22 +89,13 @@ def ot_already_credited_in_other_import(employee, attendance_date, exclude_paren
 
 
 def create_leave_allocation(employee, attendance_date, total_leave_days):
-    """
-    Add compensatory leave to existing allocation (if found) or create new one.
-    The 60-day validity is tracked via ledger entries, not separate allocations.
-    """
-    comp_leave_valid_from = add_days(attendance_date, 1)
+    comp_leave_valid_from, comp_leave_valid_to = get_comp_leave_validity_period(attendance_date)
 
     existing_allocation = get_existing_allocation_for_date(employee, comp_leave_valid_from)
-
     if existing_allocation:
-        logger.info(
-            f"Found existing allocation {existing_allocation.name}, updating it instead of creating new one"
-        )
         update_leave_allocation(existing_allocation, total_leave_days, comp_leave_valid_from)
         return existing_allocation
 
-    comp_leave_valid_to = add_days(comp_leave_valid_from, 59)
     is_carry_forward = frappe.db.get_value("Leave Type", "Compensatory Off", "is_carry_forward")
     emp = frappe.get_doc("Employee", employee)
 
@@ -152,19 +120,13 @@ def create_leave_allocation(employee, attendance_date, total_leave_days):
 
 
 def update_leave_allocation(leave_allocation, total_leave_days, comp_leave_valid_from):
-    """
-    Add more leaves to an existing allocation.
-    Creates ledger entry with 60-day validity to enforce expiry.
-    """
     leave_allocation.new_leaves_allocated += total_leave_days
     leave_allocation.total_leaves_allocated += total_leave_days
-
     leave_allocation.validate()
-
     leave_allocation.db_set("new_leaves_allocated", leave_allocation.new_leaves_allocated)
     leave_allocation.db_set("total_leaves_allocated", leave_allocation.total_leaves_allocated)
 
-    comp_leave_valid_to = add_days(comp_leave_valid_from, 59)
+    _, comp_leave_valid_to = get_comp_leave_validity_period(add_days(comp_leave_valid_from, -1))
     create_compensatory_ledger_entry(
         leave_allocation,
         total_leave_days,
@@ -174,10 +136,6 @@ def update_leave_allocation(leave_allocation, total_leave_days, comp_leave_valid
 
 
 def create_compensatory_ledger_entry(leave_allocation, leaves, from_date, to_date):
-    """
-    Create leave ledger entry with custom 60-day validity period.
-    This ensures comp-off expires after 60 days, regardless of allocation period.
-    """
     ledger = frappe.get_doc({
         "doctype": "Leave Ledger Entry",
         "employee": leave_allocation.employee,
@@ -192,38 +150,19 @@ def create_compensatory_ledger_entry(leave_allocation, leaves, from_date, to_dat
     })
     ledger.flags.ignore_permissions = True
     ledger.insert()
-    logger.info(f"Created ledger entry {ledger.name}: {leaves} days valid from {from_date} to {to_date}")
     return ledger
 
 
-# ---------------------------------------------------------
-# CANCEL COMPENSATORY LEAVE (OverTime Import Cancel Hook)
-# ---------------------------------------------------------
 @frappe.whitelist()
 def cancel_compensatory_leave(doc, method):
-    """
-    Triggered on OverTime Import cancel - reverses comp-off only when it was credited.
-    """
-    try:
-        for row in doc.overtime_import_details:
-            _reverse_comp_off_for_row(row)
-
-    except Exception:
-        logger.error(frappe.get_traceback(), "Compensatory Leave Cancellation Error")
-        raise
+    """OverTime Import on_cancel: reverse comp-off only when it was credited."""
+    for row in doc.overtime_import_details:
+        _reverse_comp_off_for_row(row)
 
 
-# ---------------------------------------------------------
-# UPDATE AFTER SUBMIT: Delta recalculation
-# ---------------------------------------------------------
 @frappe.whitelist()
 def recalculate_compensatory_leave_on_update(doc, method):
-    """
-    Triggered on OverTime Import on_update_after_submit.
-    Compares old rows (from _doc_before_save) against new rows and only
-    acts on what changed — reverses deleted/changed rows, creates new/changed rows.
-    Unchanged rows are left untouched.
-    """
+    """OverTime Import on_update_after_submit: delta credit/reverse on row changes."""
     old_doc = doc._doc_before_save
     if not old_doc:
         return
@@ -245,16 +184,11 @@ def recalculate_compensatory_leave_on_update(doc, method):
 
         if old_row and not new_row:
             _reverse_comp_off_for_row(old_row)
-
         elif new_row and not old_row:
             _create_comp_off_for_row(new_row, import_name=doc.name)
-
-        elif old_row and new_row:
-            old_ot = old_row.over_time or 0
-            new_ot = new_row.over_time or 0
-            if old_ot != new_ot:
-                _reverse_comp_off_for_row(old_row)
-                _create_comp_off_for_row(new_row, import_name=doc.name)
+        elif old_row and new_row and (old_row.over_time or 0) != (new_row.over_time or 0):
+            _reverse_comp_off_for_row(old_row)
+            _create_comp_off_for_row(new_row, import_name=doc.name)
 
 
 def _reverse_comp_off_for_row(row):
@@ -263,31 +197,22 @@ def _reverse_comp_off_for_row(row):
         return
 
     total_leave_days = flt(overtime_hours / 8, 3)
-    comp_leave_valid_from = add_days(row.attendance_date, 1)
-    comp_leave_valid_to = add_days(comp_leave_valid_from, 59)
+    comp_leave_valid_from, comp_leave_valid_to = get_comp_leave_validity_period(row.attendance_date)
 
     net_credit = get_net_comp_off_credit(row.employee, comp_leave_valid_from)
     if net_credit <= 0:
-        logger.warning(
-            f"SKIPPED reverse: no comp-off ledger credit for {row.employee} on {row.attendance_date} "
-            f"(valid from {comp_leave_valid_from}, net={net_credit})"
-        )
         return
 
     days_to_reverse = min(total_leave_days, net_credit)
-
     leave_allocation = get_existing_allocation_for_date(row.employee, comp_leave_valid_from)
     if not leave_allocation:
-        logger.warning(
-            f"SKIPPED reverse: no leave allocation for {row.employee} valid from {comp_leave_valid_from}"
-        )
         return
 
     leave_allocation.new_leaves_allocated = max(
         0, flt(leave_allocation.new_leaves_allocated) - days_to_reverse
     )
     leave_allocation.total_leaves_allocated = leave_allocation.new_leaves_allocated
-    leave_allocation.validate()
+    leave_allocation.flags.ignore_validate = True
     leave_allocation.db_set("new_leaves_allocated", leave_allocation.new_leaves_allocated)
     leave_allocation.db_set("total_leaves_allocated", leave_allocation.total_leaves_allocated)
 
@@ -297,39 +222,26 @@ def _reverse_comp_off_for_row(row):
         comp_leave_valid_from,
         comp_leave_valid_to,
     )
-    logger.info(
-        f"Reversed comp-off for {row.employee} on {row.attendance_date}: -{days_to_reverse} days"
-    )
 
 
-def _create_comp_off_for_row(row, import_name=None, row_idx=None):
+def _create_comp_off_for_row(row, import_name=None):
     overtime_hours = row.over_time or 0
     if overtime_hours <= 0:
-        if row_idx:
-            logger.warning(f"Row {row_idx} SKIPPED: No overtime hours or hours <= 0")
         return
 
-    prefix = f"Row {row_idx}: " if row_idx else ""
-    logger.info(
-        f"{prefix}Processing Employee={row.employee}, Date={row.attendance_date}, OT Hours={overtime_hours}"
-    )
-
-    compoff_enabled = frappe.db.get_value("Employee", row.employee, "compensatory_off")
-    logger.info(f"{prefix}Employee {row.employee} compensatory_off enabled = {compoff_enabled}")
-    if not compoff_enabled:
-        logger.warning(f"{prefix}SKIPPED: Employee {row.employee} does not have compensatory_off enabled")
+    if not frappe.db.get_value("Employee", row.employee, "compensatory_off"):
         return
 
     if import_name and ot_already_credited_in_other_import(
         row.employee, row.attendance_date, import_name
     ):
-        msg = _(
-            "Compensatory off for employee {0} on {1} is already credited via another submitted OverTime Import."
-        ).format(row.employee, row.attendance_date)
-        logger.warning(f"{prefix}SKIPPED: {msg}")
-        frappe.throw(msg)
+        frappe.throw(
+            _(
+                "Compensatory off for employee {0} on {1} is already credited via another submitted OverTime Import."
+            ).format(row.employee, row.attendance_date)
+        )
 
-    attendance = frappe.db.exists(
+    if not frappe.db.exists(
         "Attendance",
         {
             "employee": row.employee,
@@ -337,30 +249,14 @@ def _create_comp_off_for_row(row, import_name=None, row_idx=None):
             "status": ["not in", ["Absent", "On Leave"]],
             "docstatus": 1,
         },
-    )
-    logger.info(f"{prefix}Attendance found = {attendance}")
-    if not attendance:
-        logger.warning(
-            f"{prefix}SKIPPED: No valid attendance for {row.employee} on {row.attendance_date}"
-        )
+    ):
         return
 
     total_leave_days = flt(overtime_hours / 8, 3)
-    comp_leave_valid_from = add_days(row.attendance_date, 1)
-
-    logger.info(
-        f"{prefix}Creating/updating comp-off: {total_leave_days} days from {comp_leave_valid_from}"
-    )
+    comp_leave_valid_from, _ = get_comp_leave_validity_period(row.attendance_date)
 
     leave_allocation = get_existing_allocation_for_date(row.employee, comp_leave_valid_from)
     if leave_allocation:
-        logger.info(f"{prefix}Updating existing allocation {leave_allocation.name}")
         update_leave_allocation(leave_allocation, total_leave_days, comp_leave_valid_from)
     else:
-        logger.info(f"{prefix}Creating new allocation")
-        created_allocation = create_leave_allocation(row.employee, row.attendance_date, total_leave_days)
-        logger.info(f"{prefix}Successfully created allocation {created_allocation.name}")
-
-    logger.info(
-        f"Created comp-off for {row.employee} on {row.attendance_date}: +{total_leave_days} days"
-    )
+        create_leave_allocation(row.employee, row.attendance_date, total_leave_days)
