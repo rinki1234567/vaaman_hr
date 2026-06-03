@@ -155,9 +155,10 @@ doc_events = {
     },
     
     "OverTime Import": {
+        "validate": "vaaman_hr.vaaman_hr.over_time.validate_overtime_import_comp_off",
         "on_submit": "vaaman_hr.vaaman_hr.over_time.calculate_compensatory_leave",
         "on_cancel": "vaaman_hr.vaaman_hr.over_time.cancel_compensatory_leave",
-        "on_update_after_submit": "vaaman_hr.vaaman_hr.over_time.recalculate_compensatory_leave_on_update"
+        "on_update_after_submit": "vaaman_hr.vaaman_hr.over_time.recalculate_compensatory_leave_on_update",
     },
     "Payment Request": {
         "on_submit": "vaaman_hr.purchase_invoice.validate_invoice_outstanding"

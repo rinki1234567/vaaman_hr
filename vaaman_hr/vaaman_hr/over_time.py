@@ -3,7 +3,13 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, getdate
 
 
-@frappe.whitelist()
+def validate_overtime_import_comp_off(doc, method):
+    """Show duplicate comp-off errors on Save/Submit, before on_submit runs."""
+    if doc.docstatus != 0 or not doc.name:
+        return
+    _raise_if_duplicate_comp_off_rows(doc)
+
+
 def calculate_compensatory_leave(doc, method):
     """OverTime Import on_submit: credit comp-off with 60-day validity."""
     for row in doc.overtime_import_details:
@@ -153,14 +159,12 @@ def create_compensatory_ledger_entry(leave_allocation, leaves, from_date, to_dat
     return ledger
 
 
-@frappe.whitelist()
 def cancel_compensatory_leave(doc, method):
     """OverTime Import on_cancel: reverse comp-off only when it was credited."""
     for row in doc.overtime_import_details:
         _reverse_comp_off_for_row(row)
 
 
-@frappe.whitelist()
 def recalculate_compensatory_leave_on_update(doc, method):
     """OverTime Import on_update_after_submit: delta credit/reverse on row changes."""
     old_doc = doc._doc_before_save
@@ -224,6 +228,47 @@ def _reverse_comp_off_for_row(row):
     )
 
 
+def _raise_if_duplicate_comp_off_rows(doc):
+    """frappe.throw with a clear message for all duplicate comp-off rows."""
+    duplicates = []
+    for row in doc.overtime_import_details:
+        if not row.employee or not row.attendance_date:
+            continue
+        if not frappe.db.get_value("Employee", row.employee, "compensatory_off"):
+            continue
+        if not ot_already_credited_in_other_import(row.employee, row.attendance_date, doc.name):
+            continue
+        other_import = frappe.db.sql(
+            """
+            SELECT oi.name
+            FROM `tabOvertime Import Item` oii
+            INNER JOIN `tabOverTime Import` oi ON oi.name = oii.parent AND oi.docstatus = 1
+            WHERE oii.employee = %(employee)s
+                AND oii.attendance_date = %(attendance_date)s
+                AND oi.name != %(exclude_parent)s
+            LIMIT 1
+            """,
+            {
+                "employee": row.employee,
+                "attendance_date": getdate(row.attendance_date),
+                "exclude_parent": doc.name,
+            },
+        )
+        duplicates.append(
+            _("{0} on {1} (already in {2})").format(
+                row.employee,
+                row.attendance_date,
+                other_import[0][0] if other_import else "?",
+            )
+        )
+
+    if duplicates:
+        frappe.throw(
+            _("Compensatory off is already credited for:<br>{0}").format("<br>".join(duplicates)),
+            title=_("Duplicate OverTime Import"),
+        )
+
+
 def _create_comp_off_for_row(row, import_name=None):
     overtime_hours = row.over_time or 0
     if overtime_hours <= 0:
@@ -238,7 +283,8 @@ def _create_comp_off_for_row(row, import_name=None):
         frappe.throw(
             _(
                 "Compensatory off for employee {0} on {1} is already credited via another submitted OverTime Import."
-            ).format(row.employee, row.attendance_date)
+            ).format(row.employee, row.attendance_date),
+            title=_("Duplicate OverTime Import"),
         )
 
     if not frappe.db.exists(
@@ -253,7 +299,7 @@ def _create_comp_off_for_row(row, import_name=None):
         return
 
     total_leave_days = flt(overtime_hours / 8, 3)
-    comp_leave_valid_from, _ = get_comp_leave_validity_period(row.attendance_date)
+    comp_leave_valid_from = get_comp_leave_validity_period(row.attendance_date)[0]
 
     leave_allocation = get_existing_allocation_for_date(row.employee, comp_leave_valid_from)
     if leave_allocation:
