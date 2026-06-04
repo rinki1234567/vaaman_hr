@@ -1343,19 +1343,6 @@ def get_total_days_in_month(filters: Filters) -> int:
     return monthrange(cint(filters.year), cint(filters.month))[1]
 
 
-def get_effective_start_day(date_of_joining, filters: Filters) -> int:
-    if not date_of_joining:
-        return 1
-    joining = getdate(date_of_joining)
-    filter_year = cint(filters.year)
-    filter_month = cint(filters.month)
-    if joining.year > filter_year or (joining.year == filter_year and joining.month > filter_month):
-        return get_total_days_in_month(filters) + 1
-    if joining.year == filter_year and joining.month == filter_month:
-        return joining.day
-    return 1
-
-
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
     holiday_map = get_holiday_map(filters)
@@ -1484,7 +1471,7 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.holiday_list,
             Employee.custom_staffworker,
             Employee.attendance_device_id,
-            Employee.date_of_joining,
+            
         )
         .where(Employee.company.isin(filters.companies))
     )
@@ -1592,7 +1579,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays, details.date_of_joining
+                employee, filters, employee_attendance, holidays
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -1678,11 +1665,10 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list
 ) -> list[dict]:
-
+    
     total_days = get_total_days_in_month(filters)
-    effective_start = get_effective_start_day(date_of_joining, filters)
     attendance_values = []
     
    
@@ -1723,10 +1709,6 @@ def get_attendance_status_for_detailed_view(
 
         
         for day in range(1, total_days + 1):
-            if day < effective_start:
-                row[cstr(day)] = ""
-                continue
-
             day_att = att_map.get(day)
             h_status = get_holiday_status(day, holidays)
             day_leaves = list(set(leave_day_map.get(day, []))) # CL/SL list
@@ -1823,10 +1805,21 @@ def get_attendance_status_for_detailed_view(
                 
                 #######################################################################
                 # fist check if it's holiday and present/half day, then mark as H/P and count in PPH
-                if h_status == "Holiday" and day_att.status in ["Present", "Half Day"]:
-                    abbr = "H/P"
-                    t_p += 1.0
-                    t_pph += 1
+                if h_status == "Holiday":
+                    if day_att.status == "Present":
+                        abbr = "H/P"
+                        t_pph += 1
+                        t_p += 1
+                    elif day_att.status == "Half Day":
+                        if day_att.half_day_status == "Present":
+                            abbr = "H/P"
+                            t_pph += 0.5
+                            t_p += 0.5
+                        else:
+                            abbr = "H/P/A"
+                            t_pph += 0.5
+                            t_p += 0.5
+                            t_a += 0.5
                     
                 #####################################################################################
                 
@@ -1862,11 +1855,16 @@ def get_attendance_status_for_detailed_view(
                                     abbr = "HD/P/A"
                                     t_a += 0.5
                             else:
-                                abbr = f"HD/{m_leave_abbr}/A" if (day_att.leave_application or m_leave_abbr) else "A"
-                                t_a += 0.5 if (day_att.leave_application or m_leave_abbr) else 1.0
-                                t_l += 0.5 if (day_att.leave_application or m_leave_abbr) else 0.0
-                                if lt_key and (day_att.leave_application or m_leave_abbr): 
-                                    row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                                if day_att.leave_application or m_leave_abbr:
+                                    abbr = f"HD/{m_leave_abbr}"
+                                    t_p += 0.5
+                                    t_l += 0.5
+                                    if lt_key: 
+                                        row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                                else:
+                                    abbr = "HD/P/A"
+                                    t_a += 0.5
+                                    t_p += 0.5
                         else:
                             status_part = "P" if day_att.half_day_status == "Present" else "A"
                             if m_leave_abbr:
