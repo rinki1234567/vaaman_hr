@@ -137,6 +137,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
             [
                 "weekly_off_on_attendance",
                 "override_weekly_off_with_absent",
+                "custom_current_month_joining",
             ],
             order_by="from_date desc",
         )
@@ -149,7 +150,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
                 lwp_days_corrected,
             )
 
-        weekly_off_on_attendance, override_absent_on_holiday = ssa
+        weekly_off_on_attendance, override_absent_on_holiday, current_month_joining = ssa
 
         if not cint(weekly_off_on_attendance):
             return self.call_super_working_days(
@@ -322,7 +323,10 @@ class CustomSalarySlip(ERPNextSalarySlip):
         self.custom_pph = pph
 
         # ---------- FINAL VALUES ----------
-        self.total_working_days = total_working_days
+        if cint(current_month_joining):
+            self.total_working_days = (end_date - start_date).days + 1
+        else:
+            self.total_working_days = total_working_days
 
         self.absent_days = max(
             0,
