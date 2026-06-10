@@ -323,10 +323,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
         self.custom_pph = pph
 
         # ---------- FINAL VALUES ----------
-        if cint(current_month_joining):
-            self.total_working_days = (end_date - start_date).days + 1
-        else:
-            self.total_working_days = total_working_days
+        self.total_working_days = total_working_days
 
         self.absent_days = max(
             0,
@@ -341,6 +338,9 @@ class CustomSalarySlip(ERPNextSalarySlip):
             - flt(self.absent_days)
             - flt(self.leave_without_pay),
         )
+
+        if cint(current_month_joining):
+            self.total_working_days = (end_date - start_date).days + 1
 
         # ==========================================
         # v16 PAYROLL CORRECTION SUPPORT
