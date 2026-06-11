@@ -37,6 +37,32 @@ except ImportError:
         )
 
 
+# ==========================================
+# HOLIDAY LIST NAME COMPATIBILITY
+# ==========================================
+def get_employee_holiday_list_name(employee, start_date, end_date):
+    """
+    v15: holiday list is stored directly on the Employee record.
+    v16: holiday list is managed via Holiday List Assignment.
+         One assignment is active at a time — a newer from_date supersedes
+         the older one (no to_date field).
+    """
+    if HRMS_VERSION.major >= 16:
+        return frappe.db.get_value(
+            "Holiday List Assignment",
+            {
+                "applicable_for": "Employee",
+                "assigned_to": employee,
+                "from_date": ["<=", end_date],
+                "docstatus": 1,
+            },
+            "holiday_list",
+            order_by="from_date desc",
+        )
+
+    return frappe.db.get_value("Employee", employee, "holiday_list")
+
+
 class CustomSalarySlip(ERPNextSalarySlip):
 
     # ==========================================
@@ -111,6 +137,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
             [
                 "weekly_off_on_attendance",
                 "override_weekly_off_with_absent",
+                "custom_current_month_joining",
             ],
             order_by="from_date desc",
         )
@@ -123,7 +150,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
                 lwp_days_corrected,
             )
 
-        weekly_off_on_attendance, override_absent_on_holiday = ssa
+        weekly_off_on_attendance, override_absent_on_holiday, current_month_joining = ssa
 
         if not cint(weekly_off_on_attendance):
             return self.call_super_working_days(
@@ -206,6 +233,28 @@ class CustomSalarySlip(ERPNextSalarySlip):
         consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")
         daily_wages_fraction_for_half_day = flt(payroll_settings.get("daily_wages_fraction_for_half_day")) or 0.5
 
+        # ---------- HOLIDAY DATES (PPH & ABSENT LOGIC) ----------
+        holiday_list_name = get_employee_holiday_list_name(
+            self.employee, period_start, period_end
+        )
+
+        all_holiday_dates = set()
+        pph_holiday_dates = set()  # public holidays only (weekly_off = 0)
+
+        if holiday_list_name:
+            raw = frappe.db.get_all(
+                "Holiday",
+                filters={
+                    "parent": holiday_list_name,
+                    "holiday_date": ["between", [period_start, period_end]],
+                },
+                fields=["holiday_date", "weekly_off"],
+            )
+            all_holiday_dates = {getdate(r.holiday_date) for r in raw}
+            pph_holiday_dates = {getdate(r.holiday_date) for r in raw if not r.weekly_off}
+
+        holidays = set(holidays) | all_holiday_dates
+
         # ---------- ABSENT COUNT ----------
         absent_days = 0
 
@@ -216,8 +265,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
             status = row.status if row else None
 
             if status == "Absent":
-                if override_absent_on_holiday or not is_holiday:
-                    absent_days += 1
+                absent_days += 1
             elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
                 absent_days += 1
 
@@ -267,6 +315,13 @@ class CustomSalarySlip(ERPNextSalarySlip):
 
         self.custom_paid_leaves = paid_leaves
 
+        pph = 0
+        for date, row in attendance_by_date.items():
+            if date in pph_holiday_dates and row.status in ["Present", "Half Day"]:
+                pph += 1
+
+        self.custom_pph = pph
+
         # ---------- FINAL VALUES ----------
         self.total_working_days = total_working_days
 
@@ -283,6 +338,9 @@ class CustomSalarySlip(ERPNextSalarySlip):
             - flt(self.absent_days)
             - flt(self.leave_without_pay),
         )
+
+        if cint(current_month_joining):
+            self.total_working_days = (end_date - start_date).days + 1
 
         # ==========================================
         # v16 PAYROLL CORRECTION SUPPORT
