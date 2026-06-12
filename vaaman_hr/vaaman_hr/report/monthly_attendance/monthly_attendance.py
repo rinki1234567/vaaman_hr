@@ -1342,6 +1342,17 @@ def get_columns_for_days(filters: Filters) -> list[dict]:
 def get_total_days_in_month(filters: Filters) -> int:
     return monthrange(cint(filters.year), cint(filters.month))[1]
 
+def get_effective_start_day(date_of_joining, filters: Filters) -> int:
+    if not date_of_joining:
+        return 1
+    joining = getdate(date_of_joining)
+    filter_year = cint(filters.year)
+    filter_month = cint(filters.month)
+    if joining.year > filter_year or (joining.year == filter_year and joining.month > filter_month):
+        return get_total_days_in_month(filters) + 1
+    if joining.year == filter_year and joining.month == filter_month:
+        return joining.day
+    return 1
 
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
@@ -1471,6 +1482,7 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.holiday_list,
             Employee.custom_staffworker,
             Employee.attendance_device_id,
+            Employee.date_of_joining,
             
         )
         .where(Employee.company.isin(filters.companies))
@@ -1579,7 +1591,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays
+                employee, filters, employee_attendance, holidays, details.date_of_joining
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -1665,10 +1677,12 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
+    
 ) -> list[dict]:
     
     total_days = get_total_days_in_month(filters)
+    effective_start = get_effective_start_day(date_of_joining, filters)
     attendance_values = []
     
    
@@ -1709,6 +1723,9 @@ def get_attendance_status_for_detailed_view(
 
         
         for day in range(1, total_days + 1):
+            if day < effective_start:
+                row[cstr(day)] = ""
+                continue
             day_att = att_map.get(day)
             h_status = get_holiday_status(day, holidays)
             day_leaves = list(set(leave_day_map.get(day, []))) # CL/SL list
@@ -1820,7 +1837,21 @@ def get_attendance_status_for_detailed_view(
                             t_pph += 0.5
                             t_p += 0.5
                             t_a += 0.5
-                    
+                    elif day_att.status == "Weekly Off":
+                        abbr = "WO"
+                        t_wo  += 1
+                    elif day_att.status == "On Leave":
+                        abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
+                        if m_leave_type != "Leave Without Pay":
+                            t_l += 1.0
+                            if lt_key:
+                                row[lt_key] = row.get(lt_key, 0.0) + 1.0
+                    elif day_att.status == "Absent":
+                        abbr = "A"
+                        t_a += 1.0
+                    else:
+                        abbr = "H"
+                        t_h += 1.0
                 #####################################################################################
                 
                 # check attendance from attendance request
@@ -1829,7 +1860,8 @@ def get_attendance_status_for_detailed_view(
                         t_p += 0.5
                         if day_att.leave_application or m_leave_abbr:
                             abbr = f"HD/P/{m_leave_abbr}"
-                            t_l += 0.5
+                            if m_leave_type != "Leave Without Pay":
+                                t_l += 0.5
                             if lt_key:
                                 row[lt_key] = row.get(lt_key, 0.0) + 0.5
                                 
@@ -1848,7 +1880,8 @@ def get_attendance_status_for_detailed_view(
                                 t_p += 0.5
                                 if day_att.leave_application or m_leave_abbr:
                                     abbr = f"HD/P/{m_leave_abbr}"
-                                    t_l += 0.5
+                                    if m_leave_type != "Leave Without Pay":
+                                        t_l += 0.5
                                     if lt_key: 
                                         row[lt_key] = row.get(lt_key, 0.0) + 0.5
                                 else:
@@ -1856,9 +1889,11 @@ def get_attendance_status_for_detailed_view(
                                     t_a += 0.5
                             else:
                                 if day_att.leave_application or m_leave_abbr:
-                                    abbr = f"HD/{m_leave_abbr}"
-                                    t_p += 0.5
-                                    t_l += 0.5
+                                    abbr = f"HD/{m_leave_abbr}/A"
+                                    t_a += 0.5
+                                    if m_leave_type != "Leave Without Pay":
+                                        
+                                        t_l += 0.5
                                     if lt_key: 
                                         row[lt_key] = row.get(lt_key, 0.0) + 0.5
                                 else:
@@ -1881,7 +1916,8 @@ def get_attendance_status_for_detailed_view(
                                 t_p += 0.5
                 elif day_att.status == "On Leave":
                     abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
-                    t_l += 1.0
+                    if m_leave_type != "Leave Without Pay":
+                        t_l += 1.0
                     if lt_key:
                         row[lt_key] = row.get(lt_key, 0.0) + 1.0
                 else:

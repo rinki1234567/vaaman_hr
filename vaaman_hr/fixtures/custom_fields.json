@@ -101,7 +101,7 @@
         "insert_after": "attendance",
         "__islocal": 1
     },
-{
+ {
         "doctype": "Custom Field",
         "dt": "Salary Structure Assignment",
         "module": "Vaaman Hr",
