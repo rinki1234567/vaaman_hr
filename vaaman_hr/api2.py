@@ -1655,7 +1655,6 @@ def send_broadcast_background(users, base_message, fcm_url, headers):
         except Exception:
             pass
 
-
 def haversine_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two coordinates in meters."""
     R = 6371000
@@ -1704,6 +1703,42 @@ def simplify_path(points, tolerance_meters=5):
     else:
         return [points[0], points[end]]
 
+def smooth_path(points, iterations=2):
+    """Rounds out sharp edges using a corner-cutting algorithm."""
+    if len(points) <= 2 or iterations == 0:
+        return points
+        
+    smoothed = points.copy()
+    
+    for _ in range(iterations):
+        temp = [smoothed[0]]
+        for j in range(len(smoothed) - 1):
+            p0 = smoothed[j]
+            p1 = smoothed[j + 1]
+            
+            # Create a point at 25% of the line segment
+            temp.append({
+                "latitude": p0['latitude'] * 0.75 + p1['latitude'] * 0.25,
+                "longitude": p0['longitude'] * 0.75 + p1['longitude'] * 0.25,
+                "timestamp": p0.get('timestamp'),
+                "custom_activity": p0.get('custom_activity')
+            })
+            # Create a point at 75% of the line segment
+            temp.append({
+                "latitude": p0['latitude'] * 0.25 + p1['latitude'] * 0.75,
+                "longitude": p0['longitude'] * 0.25 + p1['longitude'] * 0.75,
+                "timestamp": p1.get('timestamp'),
+                "custom_activity": p1.get('custom_activity')
+            })
+        temp.append(smoothed[-1])
+        smoothed = temp
+        
+    return smoothed
+
+
+# ==========================================
+# MAIN API METHOD
+# ==========================================
 
 @frappe.whitelist(allow_guest=True)
 def get_filtered_historical_paths_with_sql(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
@@ -1776,7 +1811,7 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
     if not rows:
         return {"paths": []}
 
-    # 1. Group points by Employee
+    # 1. Group points by Employee and extract the Geofence
     grouped_data = {}
     geofence = None
 
@@ -1803,13 +1838,13 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
             "custom_activity": r.custom_activity
         })
 
-    # 2. Process, Clean, and Simplify Data
+    # 2. Process, Clean, Simplify, and Smooth the Data
     final_paths = []
     
     for emp_id, data in grouped_data.items():
         raw_points = data["raw_points"]
         
-        # Step A: Basic deduplication & jitter removal (minimum 5 meters between points)
+        # Step A: Basic deduplication (minimum 5 meters between points)
         cleaned_points = []
         last_pt = None
         for pt in raw_points:
@@ -1818,18 +1853,20 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
                 last_pt = pt
             else:
                 dist = haversine_distance(last_pt['latitude'], last_pt['longitude'], pt['latitude'], pt['longitude'])
-                if dist >= 5.0:  # Only keep points if they moved at least 5 meters
+                if dist >= 5.0:  
                     cleaned_points.append(pt)
                     last_pt = pt
 
         # Step B: Advanced shape simplification (Douglas-Peucker)
-        # This reduces 10,000 points in a straight line down to just 2 points (Start and End)
         simplified_points = simplify_path(cleaned_points, tolerance_meters=6)
+        
+        # Step C: Smooth out the sharp edges (Your custom algorithm)
+        beautiful_points = smooth_path(simplified_points, iterations=2)
 
         final_paths.append({
             "employee": data["employee"],
             "employee_name": data["employee_name"],
-            "coordinates": simplified_points,  # Send only the highly optimized array
+            "coordinates": beautiful_points,
             "geofence": geofence
         })
 
