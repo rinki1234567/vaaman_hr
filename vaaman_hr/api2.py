@@ -16,6 +16,13 @@ from frappe.utils import (
 from frappe.model.workflow import apply_workflow
 from frappe import _
 
+
+import math
+
+# --- MATH & GEOMETRY HELPERS ---
+
+
+
 @frappe.whitelist()
 def get_current_shift_summary(employee):
     if not employee:
@@ -1649,7 +1656,55 @@ def send_broadcast_background(users, base_message, fcm_url, headers):
             pass
 
 
-#new method for testing app these will never cause any issue in prodcution
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance between two coordinates in meters."""
+    R = 6371000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def perpendicular_distance(pt, start, end):
+    """Used for Douglas-Peucker simplification."""
+    dx = end['longitude'] - start['longitude']
+    dy = end['latitude'] - start['latitude']
+    mag_sq = dx**2 + dy**2
+
+    if mag_sq == 0:
+        return haversine_distance(pt['latitude'], pt['longitude'], start['latitude'], start['longitude'])
+
+    pvx = pt['longitude'] - start['longitude']
+    pvy = pt['latitude'] - start['latitude']
+    u = max(0, min(1, (pvx * dx + pvy * dy) / mag_sq))
+
+    ix = start['longitude'] + u * dx
+    iy = start['latitude'] + u * dy
+    return haversine_distance(pt['latitude'], pt['longitude'], iy, ix)
+
+def simplify_path(points, tolerance_meters=5):
+    """Douglas-Peucker algorithm to remove redundant points in a straight line."""
+    if len(points) <= 2:
+        return points
+
+    max_dist = 0
+    index = 0
+    end = len(points) - 1
+
+    for i in range(1, end):
+        dist = perpendicular_distance(points[i], points[0], points[end])
+        if dist > max_dist:
+            max_dist = dist
+            index = i
+
+    if max_dist > tolerance_meters:
+        left = simplify_path(points[:index+1], tolerance_meters)
+        right = simplify_path(points[index:], tolerance_meters)
+        return left[:-1] + right
+    else:
+        return [points[0], points[end]]
+
+
 @frappe.whitelist(allow_guest=True)
 def get_filtered_historical_paths_with_sql(date, department=None, branch=None, custom_branch_unit=None, employee_id=None):
     try:
@@ -1676,46 +1731,44 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
     where_clause = " AND ".join(filters)
 
     query = f"""
-        SELECT
-            l.employee,
-            COALESCE(e.employee_name, CONCAT_WS(' ', e.first_name, e.last_name), e.name) AS employee_name,
-            l.latitude,
-            l.longitude,
-            l.timestamp,
-            l.custom_activity,
-            bu.geofence_vertices
-        FROM `tabLocation Log` l
-        JOIN `tabEmployee` e ON e.name = l.employee
-        LEFT JOIN `tabShift Assignment` sa
-            ON sa.employee = e.name
-            AND sa.status = 'Active'
-            AND sa.docstatus = 1
-            AND %(date_str)s BETWEEN sa.start_date AND sa.end_date
-        LEFT JOIN `tabShift Type` st
-            ON st.name = COALESCE(sa.shift_type, e.default_shift)
-        LEFT JOIN `tabBranch Unit` bu
-            ON bu.name = l.branch_unit
-        /* NEW: Join the VaamanHR Settings table based on the employee's branch */
-        LEFT JOIN `tabVaamanHR Settings` vhs
-            ON vhs.branch = e.branch
-        WHERE
-            {where_clause}
-            AND l.timestamp BETWEEN
-                CASE
-                    WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 00:00:00')
-                    ELSE CONCAT(%(date_str)s, ' ', TIME(st.start_time))
-                END
-            AND
-                /* NEW: Wrap the entire End-Time logic in a DATE_ADD to apply the cushion */
-                DATE_ADD(
-                    CASE
-                        WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 23:59:59')
-                        WHEN TIME(st.end_time) <= TIME(st.start_time)
-                            THEN DATE_ADD(CONCAT(%(date_str)s, ' ', TIME(st.end_time)), INTERVAL 1 DAY)
-                        ELSE CONCAT(%(date_str)s, ' ', TIME(st.end_time))
-                    END,
-                    INTERVAL COALESCE(vhs.shift_end_cushion, 0) MINUTE
-                )
+        SELECT 
+            l.employee, 
+            COALESCE(e.employee_name, CONCAT_WS(' ', e.first_name, e.last_name), e.name) AS employee_name, 
+            l.latitude, 
+            l.longitude, 
+            l.timestamp, 
+            l.custom_activity, 
+            bu.geofence_vertices 
+        FROM `tabLocation Log` l 
+        JOIN `tabEmployee` e ON e.name = l.employee 
+        LEFT JOIN `tabShift Assignment` sa 
+            ON sa.employee = e.name 
+            AND sa.status = 'Active' 
+            AND sa.docstatus = 1 
+            AND %(date_str)s BETWEEN sa.start_date AND sa.end_date 
+        LEFT JOIN `tabShift Type` st 
+            ON st.name = COALESCE(sa.shift_type, e.default_shift) 
+        LEFT JOIN `tabBranch Unit` bu 
+            ON bu.name = l.branch_unit 
+        LEFT JOIN `tabVaamanHR Settings` vhs 
+            ON vhs.branch = e.branch 
+        WHERE 
+            {where_clause} 
+            AND l.timestamp BETWEEN 
+                CASE 
+                    WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 00:00:00') 
+                    ELSE CONCAT(%(date_str)s, ' ', TIME(st.start_time)) 
+                END 
+            AND 
+                DATE_ADD( 
+                    CASE 
+                        WHEN st.name IS NULL THEN CONCAT(%(date_str)s, ' 23:59:59') 
+                        WHEN TIME(st.end_time) <= TIME(st.start_time) 
+                            THEN DATE_ADD(CONCAT(%(date_str)s, ' ', TIME(st.end_time)), INTERVAL 1 DAY) 
+                        ELSE CONCAT(%(date_str)s, ' ', TIME(st.end_time)) 
+                    END, 
+                    INTERVAL COALESCE(vhs.shift_end_cushion, 0) MINUTE 
+                ) 
         ORDER BY l.employee, l.timestamp
     """
 
@@ -1723,40 +1776,61 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
     if not rows:
         return {"paths": []}
 
-    paths = []
+    # 1. Group points by Employee
+    grouped_data = {}
+    geofence = None
+
     for r in rows:
-        geofence = None
-        if r.geofence_vertices:
+        # Extract geofence once if available
+        if not geofence and r.geofence_vertices:
             try:
                 geofence = {"vertices": json.loads(r.geofence_vertices)}
             except Exception:
-                geofence = None
+                pass
 
-        paths.append({
-            "employee": r.employee,
-            "employee_name": r.employee_name,
-            "latitude": r.latitude,
-            "longitude": r.longitude,
-            "timestamp": r.timestamp,
-            "custom_activity": r.custom_activity,
+        emp_id = r.employee
+        if emp_id not in grouped_data:
+            grouped_data[emp_id] = {
+                "employee": emp_id,
+                "employee_name": r.employee_name,
+                "raw_points": []
+            }
+            
+        grouped_data[emp_id]["raw_points"].append({
+            "latitude": float(r.latitude),
+            "longitude": float(r.longitude),
+            "timestamp": str(r.timestamp),
+            "custom_activity": r.custom_activity
+        })
+
+    # 2. Process, Clean, and Simplify Data
+    final_paths = []
+    
+    for emp_id, data in grouped_data.items():
+        raw_points = data["raw_points"]
+        
+        # Step A: Basic deduplication & jitter removal (minimum 5 meters between points)
+        cleaned_points = []
+        last_pt = None
+        for pt in raw_points:
+            if not last_pt:
+                cleaned_points.append(pt)
+                last_pt = pt
+            else:
+                dist = haversine_distance(last_pt['latitude'], last_pt['longitude'], pt['latitude'], pt['longitude'])
+                if dist >= 5.0:  # Only keep points if they moved at least 5 meters
+                    cleaned_points.append(pt)
+                    last_pt = pt
+
+        # Step B: Advanced shape simplification (Douglas-Peucker)
+        # This reduces 10,000 points in a straight line down to just 2 points (Start and End)
+        simplified_points = simplify_path(cleaned_points, tolerance_meters=6)
+
+        final_paths.append({
+            "employee": data["employee"],
+            "employee_name": data["employee_name"],
+            "coordinates": simplified_points,  # Send only the highly optimized array
             "geofence": geofence
         })
 
-    return {"paths": paths}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return {"paths": final_paths}
