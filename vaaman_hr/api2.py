@@ -290,7 +290,8 @@ def get_vaamanhr_settings():
             response["employee_helper"] = {
                 "name": helper_doc.name,
                 "fcm_token": helper_doc.fcm_token,
-                "face_embeddings": helper_doc.face_embeddings 
+                "face_embeddings": helper_doc.face_embeddings,
+                "permission_banner_shown": helper_doc.permission_banner_shown
             }
 
             if hasattr(helper_doc, "given_features"):
