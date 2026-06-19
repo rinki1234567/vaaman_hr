@@ -9,7 +9,8 @@
   "employee_name",
   "given_features",
   "face_embeddings",
-  "fcm_token"
+  "fcm_token",
+  "permission_banner_shown"
  ],
  "fields": [
   {
@@ -39,6 +40,12 @@
    "fieldname": "fcm_token",
    "fieldtype": "Text",
    "label": "FCM Token"
+  },
+  {
+   "default": "0",
+   "fieldname": "permission_banner_shown",
+   "fieldtype": "Check",
+   "label": "Permission Banner Shown"
   }
  ],
  "grid_page_length": 50,
