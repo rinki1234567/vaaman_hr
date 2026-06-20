@@ -22,9 +22,14 @@ WEEKDAY_EARLY_EXIT_UNTIL = "18:29:00"  # last allowed early out minute (6:30:00�
 SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"  # earliest allowed Saturday early out (15 min before 5:00 PM)
 SATURDAY_EARLY_EXIT_UNTIL = "16:59:00"  # last allowed Saturday early out minute (5:00:00–5:00:59 is on-time)
 
+# Lunch break (Mon–Fri): 1:00–1:30 PM — not counted in working hours
+LUNCH_START = "13:00:00"
+LUNCH_END = "13:30:00"
+LUNCH_BREAK_HOURS = 0.5
+
 POLICY = {
 	"weekday": {
-		"full_day_hours": 8.0,
+		"full_day_hours": 8.0,  # net work hours; 10:00–6:30 clock = 8.0 work + 0.5 lunch
 		"min_half_day_hours": 4.5,
 		"core_in_by": LATE_ENTRY_AFTER,
 		"first_half_out_by": "14:30:00",
@@ -188,7 +193,22 @@ def is_beyond_allowed_early_exit(out_time, attendance_date):
 	return out_t < mandatory_out and out_t < grace_from
 
 
-def calc_working_hours(logs):
+def _has_explicit_lunch_break(logs):
+	"""True when punches already include a lunch break (OUT before 1:30, IN from 1:00)."""
+	for idx, log in enumerate(logs):
+		if log.log_type != "OUT":
+			continue
+		if get_time(log.time) > get_time(LUNCH_END):
+			continue
+		for later in logs[idx + 1 :]:
+			if later.log_type == "IN":
+				return get_time(later.time) >= get_time(LUNCH_START)
+			if later.log_type == "OUT":
+				break
+	return False
+
+
+def calc_working_hours(logs, attendance_date=None):
 	working_hours = 0
 	last_in = None
 	for log in logs:
@@ -197,7 +217,20 @@ def calc_working_hours(logs):
 		elif log.log_type == "OUT" and last_in:
 			working_hours += time_diff_in_hours(log.time, last_in)
 			last_in = None
-	return flt(working_hours)
+
+	working_hours = flt(working_hours)
+
+	if attendance_date and logs:
+		first_in = get_time(logs[0].time)
+		last_out = get_time(logs[-1].time)
+		if (
+			first_in <= get_time(LUNCH_START)
+			and last_out >= get_time(LUNCH_END)
+			and not _has_explicit_lunch_break(logs)
+		):
+			working_hours = max(0, flt(working_hours - LUNCH_BREAK_HOURS))
+
+	return working_hours
 
 
 def check_late_entry_early_exit(in_time, out_time, attendance_date):
@@ -256,54 +289,96 @@ def get_violation_reason(in_time, out_time, attendance_date):
 	return None
 
 
+def meets_first_half_timing(attendance_date, in_time, out_time):
+	"""First half: on-time in by core cutoff and out by first-half end."""
+	rules = get_rules(attendance_date)
+	return get_time(in_time) <= get_time(rules["core_in_by"]) and get_time(out_time) >= get_time(
+		rules["first_half_out_by"]
+	)
+
+
+def meets_second_half_timing(attendance_date, in_time, out_time):
+	"""Second half: in by second-half cutoff and out by mandatory end (or allowed early)."""
+	rules = get_rules(attendance_date)
+	return get_time(in_time) <= get_time(rules["second_half_in_by"]) and is_on_time_or_allowed_early_out(
+		out_time, attendance_date
+	)
+
+
+def meets_half_day_timing(attendance_date, in_time, out_time):
+	return meets_first_half_timing(attendance_date, in_time, out_time) or meets_second_half_timing(
+		attendance_date, in_time, out_time
+	)
+
+
+def get_violation_penalty_status(attendance_date, logs):
+	"""
+	For policy violations (4th late/early, or late beyond 15 min):
+	Half Day if minimum hours and first/second half timing met, else Absent.
+	Early exit beyond the 15-minute allowance is always Absent.
+	"""
+	if not logs:
+		return "Absent", ""
+
+	in_time = logs[0].time
+	out_time = logs[-1].time
+
+	if is_beyond_allowed_early_exit(out_time, attendance_date):
+		return "Absent", ""
+
+	working_hours = calc_working_hours(logs, attendance_date)
+	rules = get_rules(attendance_date)
+
+	if working_hours >= rules["min_half_day_hours"] and meets_half_day_timing(
+		attendance_date, in_time, out_time
+	):
+		return "Half Day", "Present"
+
+	return "Absent", ""
+
+
 def compute_head_office_status(attendance_date, logs, leave_application=None):
 	"""Return (working_hours, status, half_day_status, late_entry, early_exit)."""
 	if not logs:
 		return 0, None, None, 0, 0
 
-	working_hours = calc_working_hours(logs)
-	in_time = get_time(logs[0].time)
-	out_time = get_time(logs[-1].time)
+	working_hours = calc_working_hours(logs, attendance_date)
+	in_dt = logs[0].time
+	out_dt = logs[-1].time
+	in_time = get_time(in_dt)
+	out_time = get_time(out_dt)
 	rules = get_rules(attendance_date)
-	late_entry, early_exit = check_late_entry_early_exit(logs[0].time, logs[-1].time, attendance_date)
+	late_entry, early_exit = check_late_entry_early_exit(in_dt, out_dt, attendance_date)
+	beyond_late = is_beyond_allowed_late(in_dt)
 
 	final_status = "Absent"
 	final_half_day_status = ""
 
-	if is_beyond_allowed_late(logs[0].time) or is_beyond_allowed_early_exit(logs[-1].time, attendance_date):
+	if is_beyond_allowed_early_exit(out_dt, attendance_date):
 		return working_hours, "Absent", "", 0, 0
 
-	# Full day Present: enough hours + on-time / allowed early / pre-close cushion
-	if working_hours >= rules["full_day_hours"] and is_on_time_or_allowed_early_out(
-		logs[-1].time, attendance_date
+	# Full day Present: not beyond 15-min late + enough hours + on-time / allowed early out
+	if (
+		not beyond_late
+		and working_hours >= rules["full_day_hours"]
+		and is_on_time_or_allowed_early_out(out_dt, attendance_date)
 	):
 		final_status = "Present"
 		final_half_day_status = ""
-	elif working_hours >= rules["min_half_day_hours"]:
-		is_timing_ok = False
-		if in_time <= get_time(rules["core_in_by"]) and out_time >= get_time(rules["first_half_out_by"]):
-			is_timing_ok = True
-		elif in_time <= get_time(rules["second_half_in_by"]) and is_on_time_or_allowed_early_out(
-			logs[-1].time, attendance_date
-		):
-			is_timing_ok = True
-
-		if is_timing_ok:
-			final_status = "Half Day"
-			final_half_day_status = "Present"
-		else:
-			final_status = "Absent"
-			final_half_day_status = ""
+	elif working_hours >= rules["min_half_day_hours"] and meets_half_day_timing(
+		attendance_date, in_dt, out_dt
+	):
+		final_status = "Half Day"
+		final_half_day_status = "Present"
+	elif leave_application:
+		final_status = "Half Day"
+		final_half_day_status = "Absent"
 	else:
-		if leave_application:
-			final_status = "Half Day"
-			final_half_day_status = "Absent"
-		else:
-			final_status = "Absent"
-			final_half_day_status = ""
+		final_status = "Absent"
+		final_half_day_status = ""
 
-	# Late/early only applies to full-day Present without approved half-day leave
-	if final_status != "Present" or leave_application:
+	# Monthly late/early flags: keep on Present and Half Day (allowed window only)
+	if leave_application or final_status == "Absent":
 		late_entry, early_exit = 0, 0
 
 	return working_hours, final_status, final_half_day_status, late_entry, early_exit
