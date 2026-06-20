@@ -13,10 +13,11 @@ CORE_IN_TIME = "10:00:00"
 WEEKDAY_FULL_DAY_OUT = "18:30:00"  # must work till 6:30 PM
 SATURDAY_FULL_DAY_OUT = "17:00:00"  # may leave by 5:00 PM
 
-# 15-minute grace — each counts as 1 of 3 allowed occasions per month (late + early combined)
-LATE_ENTRY_AFTER = "10:15:00"  # late by up to 15 min (after 10:00 AM)
-WEEKDAY_EARLY_EXIT_BEFORE = "18:15:00"  # leave early by up to 15 min (before 6:30 PM)
-SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"  # leave early by up to 15 min (before 5:00 PM)
+# Allowed late/early window — each counts as 1 of 3 occasions per month (late + early combined).
+# Any punch after 10:00 is a late mark; beyond 10:15 is Absent (not one of the 3 slots).
+LATE_ENTRY_AFTER = "10:15:00"  # latest allowed late punch-in (15 min after 10:00 AM)
+WEEKDAY_EARLY_EXIT_BEFORE = "18:15:00"  # earliest allowed weekday early out (15 min before 6:30 PM)
+SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"  # earliest allowed Saturday early out (15 min before 5:00 PM)
 
 POLICY = {
 	"weekday": {
@@ -136,6 +137,27 @@ def get_checkin_logs(employee, attendance_date):
 	)
 
 
+def is_beyond_allowed_late(in_time):
+	"""Punch-in more than 15 minutes after core start → not covered by monthly allowance."""
+	if not in_time:
+		return False
+	return get_time(in_time) > get_time(LATE_ENTRY_AFTER)
+
+
+def is_beyond_allowed_early_exit(out_time, attendance_date):
+	"""Left more than 15 minutes before mandatory end → not covered by monthly allowance."""
+	if not out_time:
+		return False
+
+	out_t = get_time(out_time)
+	rules = get_rules(attendance_date)
+	mandatory_out = get_time(rules["full_day_out_by"])
+	grace_early_out = get_time(
+		SATURDAY_EARLY_EXIT_BEFORE if is_saturday(attendance_date) else WEEKDAY_EARLY_EXIT_BEFORE
+	)
+	return out_t < mandatory_out and out_t < grace_early_out
+
+
 def calc_working_hours(logs):
 	working_hours = 0
 	last_in = None
@@ -150,10 +172,9 @@ def calc_working_hours(logs):
 
 def check_late_entry_early_exit(in_time, out_time, attendance_date):
 	"""
-	Return (late_entry, early_exit) as 0/1.
-	Each flag uses one of 3 allowed monthly occasions (combined late + early).
-	- late_entry: in after 10:15 AM
-	- early_exit: out before mandatory time but within 15-min early grace
+	Return (late_entry, early_exit) as 0/1 for allowed monthly occasions only.
+	- late_entry: in after 10:00 AM and up to 10:15 AM
+	- early_exit: out within allowed early window (6:15–6:30 / 4:45–5:00)
 	"""
 	if not in_time or not out_time:
 		return 0, 0
@@ -162,8 +183,10 @@ def check_late_entry_early_exit(in_time, out_time, attendance_date):
 	out_t = get_time(out_time)
 	rules = get_rules(attendance_date)
 
-	late_entry = 1 if in_t > get_time(LATE_ENTRY_AFTER) else 0
-	# Early exit = left before 6:30/5:00 but no earlier than grace cutoff (6:15/4:45)
+	core_in = get_time(CORE_IN_TIME)
+	allowed_late_cutoff = get_time(LATE_ENTRY_AFTER)
+	late_entry = 1 if core_in < in_t <= allowed_late_cutoff else 0
+
 	mandatory_out = get_time(rules["full_day_out_by"])
 	grace_early_out = get_time(
 		SATURDAY_EARLY_EXIT_BEFORE if is_saturday(attendance_date) else WEEKDAY_EARLY_EXIT_BEFORE
@@ -173,18 +196,33 @@ def check_late_entry_early_exit(in_time, out_time, attendance_date):
 	return late_entry, early_exit
 
 
-def get_violation_reason(in_time, out_time, attendance_date):
+def get_immediate_violation_reason(in_time, out_time, attendance_date):
+	"""Same-day Absent: late beyond 15 min or early beyond 15 min."""
 	if not in_time or not out_time:
 		return None
 
-	in_t = get_time(in_time)
-	out_t = get_time(out_time)
+	if is_beyond_allowed_late(in_time):
+		return f"Late Entry beyond allowed 15 minutes (After {LATE_ENTRY_AFTER[:5]} AM)"
+
+	if is_beyond_allowed_early_exit(out_time, attendance_date):
+		if is_saturday(attendance_date):
+			return f"Early Leaving beyond allowed 15 minutes (Saturday before {SATURDAY_EARLY_EXIT_BEFORE[:5]} PM)"
+		return f"Early Leaving beyond allowed 15 minutes (Before {WEEKDAY_EARLY_EXIT_BEFORE[:5]} PM)"
+
+	return None
+
+
+def get_violation_reason(in_time, out_time, attendance_date):
+	"""Monthly 4th+ violation among allowed late/early occasions."""
+	if not in_time or not out_time:
+		return None
+
 	late_entry, early_exit = check_late_entry_early_exit(in_time, out_time, attendance_date)
 
 	if late_entry and early_exit:
-		return f"Late Entry (After {LATE_ENTRY_AFTER[:5]} AM) and Early Leaving"
+		return f"Late Entry (After {CORE_IN_TIME[:5]} AM) and Early Leaving"
 	if late_entry:
-		return f"Late Entry (After {LATE_ENTRY_AFTER[:5]} AM)"
+		return f"Late Entry (After {CORE_IN_TIME[:5]} AM)"
 	if early_exit:
 		if is_saturday(attendance_date):
 			return f"Early Leaving (Saturday before {SATURDAY_EARLY_EXIT_BEFORE[:5]} PM)"
@@ -211,7 +249,10 @@ def compute_head_office_status(attendance_date, logs, leave_application=None):
 		SATURDAY_EARLY_EXIT_BEFORE if is_saturday(attendance_date) else WEEKDAY_EARLY_EXIT_BEFORE
 	)
 
-	# Full day Present: enough hours + on-time OR within 15-min early grace (uses 1 of 3/month)
+	if is_beyond_allowed_late(logs[0].time) or is_beyond_allowed_early_exit(logs[-1].time, attendance_date):
+		return working_hours, "Absent", "", 0, 0
+
+	# Full day Present: enough hours + on-time out OR allowed early exit (uses 1 of 3/month)
 	if working_hours >= rules["full_day_hours"] and (
 		out_time >= mandatory_out or (early_exit and out_time >= grace_early_out)
 	):

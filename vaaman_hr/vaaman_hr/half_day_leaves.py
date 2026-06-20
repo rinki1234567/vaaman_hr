@@ -37,6 +37,9 @@ def validate_half_day_attendance(doc, method=None):
 	if not is_head_office_employee(doc.employee):
 		return
 
+	if frappe.flags.get("skip_head_office_attendance_validation"):
+		return
+
 	# Attendance Request or Leave Application — do not override status / late / early
 	if is_exempt_from_head_office_policy(doc):
 		return
