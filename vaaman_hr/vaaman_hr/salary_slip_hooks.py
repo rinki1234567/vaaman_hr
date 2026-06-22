@@ -23,7 +23,7 @@ def calculate_overtime_hours(doc, method):
             ON oai.parent = oa.name
         WHERE oai.employee = %s
         AND oa.month BETWEEN %s AND %s
-        AND oa.docstatus != 2
+        AND oa.docstatus = 1
     """, (doc.employee, doc.start_date, doc.end_date))[0][0] or 0
 
     doc.total_overtime_hours = overtime_import_ot + ot_adjustment_ot

@@ -140,6 +140,20 @@
     },
 
     {
+        "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary Structure Assignment-mark_absent_on_public_holiday",
+        "fieldname": "mark_absent_on_public_holiday",
+        "fieldtype": "Check",
+        "label": "Mark Absent on Public Holiday",
+        "description": "If enabled, Absent marked on a public holiday (non-weekly-off) is counted in absent days. If disabled, Absent on holidays is skipped (default).",
+        "insert_after": "override_weekly_off_with_absent",
+        "__islocal": 1,
+        "allow_on_submit": 1
+    },
+
+    {
         "doctype": "Property Setter",
         "doctype_or_field": "DocField",
         "doc_type": "Leave Type",
