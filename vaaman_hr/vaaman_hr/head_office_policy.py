@@ -169,6 +169,18 @@ def calc_working_hours(logs):
 	return flt(working_hours)
 
 
+def get_policy_punch_times(logs):
+	"""First IN and last OUT (by log_type) for policy timing — not raw first/last log row."""
+	first_in = None
+	last_out = None
+	for log in logs:
+		if log.log_type == "IN" and first_in is None:
+			first_in = log.time
+		if log.log_type == "OUT":
+			last_out = log.time
+	return first_in, last_out
+
+
 def check_late_entry_early_exit(in_time, out_time, attendance_date):
 	"""
 	Return (late_entry, early_exit) as 0/1 for allowed monthly occasions only.
@@ -262,8 +274,10 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 		return 0, None, None, 0, 0
 
 	working_hours = calc_working_hours(logs)
-	in_dt = logs[0].time
-	out_dt = logs[-1].time
+	in_dt, out_dt = get_policy_punch_times(logs)
+	if not in_dt or not out_dt:
+		return working_hours, None, None, 0, 0
+
 	rules = get_rules(attendance_date)
 	late_entry, early_exit = check_late_entry_early_exit(in_dt, out_dt, attendance_date)
 

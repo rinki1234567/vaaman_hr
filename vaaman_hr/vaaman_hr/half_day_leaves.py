@@ -4,14 +4,14 @@ from frappe.utils import flt
 from vaaman_hr.vaaman_hr.head_office_policy import (
 	compute_head_office_status,
 	get_checkin_logs,
+	get_policy_punch_times,
 	is_exempt_from_head_office_policy,
 	is_head_office_employee,
 )
 
 
 def apply_attendance_status(doc, working_hours, status, half_day_status, logs, late_entry=0, early_exit=0):
-	in_dt = logs[0].time if logs else None
-	out_dt = logs[-1].time if logs else None
+	in_dt, out_dt = get_policy_punch_times(logs) if logs else (None, None)
 
 	values = {
 		"working_hours": flt(working_hours),
