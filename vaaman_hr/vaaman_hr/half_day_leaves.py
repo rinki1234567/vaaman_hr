@@ -49,7 +49,7 @@ def validate_half_day_attendance(doc, method=None):
 		return
 
 	working_hours, status, half_day_status, late_entry, early_exit = compute_head_office_status(
-		doc.attendance_date, logs, doc.leave_application
+		doc.attendance_date, logs, doc.leave_application, employee=doc.employee
 	)
 	if status is None:
 		return

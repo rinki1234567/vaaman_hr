@@ -8,11 +8,9 @@ from vaaman_hr.vaaman_hr.head_office_policy import (
 	check_late_entry_early_exit,
 	get_checkin_logs,
 	get_immediate_violation_reason,
-	get_violation_penalty_status,
 	get_violation_reason,
 	has_approved_half_day_leave,
 	head_office_branch_condition,
-	is_beyond_allowed_early_exit,
 	is_exempt_from_head_office_policy,
 )
 
@@ -40,8 +38,8 @@ def _head_office_attendance_query(from_date, extra_conditions=""):
 	)
 
 
-def _apply_policy_penalty(record, reason, log_remarks, logs=None):
-	"""Amend attendance to Half Day or Absent based on hours worked and timing."""
+def _amend_attendance_to_absent(record, reason, log_remarks, logs=None):
+	"""Amend attendance to Absent for policy violations (4th late/early, beyond 15-min late/early)."""
 	original = frappe.get_doc("Attendance", record.name)
 	if is_exempt_from_head_office_policy(original):
 		return None
@@ -49,7 +47,6 @@ def _apply_policy_penalty(record, reason, log_remarks, logs=None):
 	if logs is None:
 		logs = get_checkin_logs(original.employee, original.attendance_date)
 
-	status, half_day_status = get_violation_penalty_status(original.attendance_date, logs)
 	working_hours = (
 		calc_working_hours(logs, original.attendance_date) if logs else flt(original.working_hours)
 	)
@@ -59,8 +56,8 @@ def _apply_policy_penalty(record, reason, log_remarks, logs=None):
 
 	amended_att = frappe.copy_doc(original)
 	amended_att.docstatus = 1
-	amended_att.status = status
-	amended_att.half_day_status = half_day_status or ""
+	amended_att.status = "Absent"
+	amended_att.half_day_status = ""
 	amended_att.working_hours = working_hours
 	amended_att.late_entry = 0
 	amended_att.early_exit = 0
@@ -71,7 +68,6 @@ def _apply_policy_penalty(record, reason, log_remarks, logs=None):
 	finally:
 		frappe.flags.skip_head_office_attendance_validation = False
 
-	action = "Converted to Half Day" if status == "Half Day" else "Converted to Absent"
 	amended_att.add_comment("Comment", reason)
 
 	frappe.get_doc(
@@ -80,7 +76,7 @@ def _apply_policy_penalty(record, reason, log_remarks, logs=None):
 			"employee": original.employee,
 			"attendance": amended_att.name,
 			"attendance_date": amended_att.attendance_date,
-			"action_taken": action,
+			"action_taken": "Converted to Absent",
 			"remarks": log_remarks,
 		}
 	).insert(ignore_permissions=True)
@@ -89,11 +85,11 @@ def _apply_policy_penalty(record, reason, log_remarks, logs=None):
 
 
 def process_immediate_policy_violations(from_date="2026-04-01"):
-	"""Apply Half Day or Absent when late/early exceeds the 15-minute allowance."""
+	"""Mark Present attendance Absent when late/early exceeds the 15-minute allowance."""
 	records = _head_office_attendance_query(
 		from_date,
 		extra_conditions="""
-			AND att.status IN ('Present', 'Half Day')
+			AND att.status = 'Present'
 			AND att.in_time IS NOT NULL
 			AND att.out_time IS NOT NULL
 		""",
@@ -110,17 +106,11 @@ def process_immediate_policy_violations(from_date="2026-04-01"):
 		if not reason:
 			continue
 
-		# Already marked Half Day from punch policy and not an early-exit violation — skip.
-		if record.status == "Half Day" and not is_beyond_allowed_early_exit(
-			record.out_time, record.attendance_date
-		):
-			continue
-
 		try:
 			logs = get_checkin_logs(record.employee, record.attendance_date)
-			amended = _apply_policy_penalty(
+			amended = _amend_attendance_to_absent(
 				record,
-				f"Marked due to {reason}.",
+				f"Marked as Absent due to {reason}.",
 				f"Policy violation: {reason}",
 				logs=logs,
 			)
@@ -217,18 +207,13 @@ def process_attendance_policy():
 						continue
 
 					logs = get_checkin_logs(record.employee, record.attendance_date)
-					penalty_status, _ = get_violation_penalty_status(
-						record.attendance_date, logs
-					)
-					penalty_label = "Half Day" if penalty_status == "Half Day" else "Absent"
-
-					amended_att = _apply_policy_penalty(
+					amended_att = _amend_attendance_to_absent(
 						record,
-						f"Marked as {penalty_label} due to {ALLOWED_LATE_EARLY_PER_MONTH + 1}th or subsequent "
+						f"Marked as Absent due to {ALLOWED_LATE_EARLY_PER_MONTH + 1}th or subsequent "
 						f"late/early violation ({reason}) in {month}.",
 						(
 							f"Exceeded {ALLOWED_LATE_EARLY_PER_MONTH} allowed late/early occasions. "
-							f"Violation: {reason}. Penalty: {penalty_label} based on hours worked."
+							f"Violation: {reason}"
 						),
 						logs=logs,
 					)
@@ -241,7 +226,7 @@ def process_attendance_policy():
 							recipients=[user_id],
 							subject="Attendance Policy Violation",
 							message=(
-								f"You have been marked as {penalty_label} on {amended_att.attendance_date} "
+								f"You have been marked as Absent on {amended_att.attendance_date} "
 								f"for exceeding {ALLOWED_LATE_EARLY_PER_MONTH} allowed occasions of "
 								f"late entry or early leaving in {month}."
 							),
