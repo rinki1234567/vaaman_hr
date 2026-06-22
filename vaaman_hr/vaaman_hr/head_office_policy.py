@@ -26,7 +26,8 @@ POLICY = {
 		"min_half_day_hours": 4.5,
 		"core_in_by": LATE_ENTRY_AFTER,
 		"first_half_out_by": "14:30:00",
-		"second_half_in_by": "14:00:00",
+		"second_half_in_by": "14:00:00",  # last allowed IN minute for 2nd half (14:00:00–14:00:59)
+		"second_half_in_after": "14:01:00",
 		"full_day_out_by": WEEKDAY_FULL_DAY_OUT,
 	},
 	"saturday": {
@@ -34,7 +35,8 @@ POLICY = {
 		"min_half_day_hours": 4.0,
 		"core_in_by": LATE_ENTRY_AFTER,
 		"first_half_out_by": "14:00:00",
-		"second_half_in_by": "13:00:00",
+		"second_half_in_by": "13:00:00",  # last allowed IN minute for 2nd half (13:00:00–13:00:59)
+		"second_half_in_after": "13:01:00",
 		"full_day_out_by": SATURDAY_FULL_DAY_OUT,
 	},
 }
@@ -231,10 +233,17 @@ def meets_first_half_timing(attendance_date, in_time, out_time):
 	)
 
 
+def is_second_half_in_on_time(in_time, attendance_date):
+	"""Second-half IN allowed through the full last minute (e.g. 14:00:00–14:00:59 weekday)."""
+	if not in_time:
+		return False
+	rules = get_rules(attendance_date)
+	return get_time(in_time) < get_time(rules["second_half_in_after"])
+
+
 def meets_second_half_timing(attendance_date, in_time, out_time):
 	"""Second half: in by second-half cutoff and out by mandatory end (or allowed early)."""
-	rules = get_rules(attendance_date)
-	return get_time(in_time) <= get_time(rules["second_half_in_by"]) and is_on_time_or_allowed_early_out(
+	return is_second_half_in_on_time(in_time, attendance_date) and is_on_time_or_allowed_early_out(
 		out_time, attendance_date
 	)
 
