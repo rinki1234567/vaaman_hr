@@ -47,9 +47,7 @@ def _amend_attendance_to_absent(record, reason, log_remarks, logs=None):
 	if logs is None:
 		logs = get_checkin_logs(original.employee, original.attendance_date)
 
-	working_hours = (
-		calc_working_hours(logs, original.attendance_date) if logs else flt(original.working_hours)
-	)
+	working_hours = calc_working_hours(logs) if logs else flt(original.working_hours)
 
 	if original.docstatus == 1:
 		original.cancel()

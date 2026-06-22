@@ -5,11 +5,9 @@ import frappe
 from frappe.utils import getdate, get_time, flt, time_diff_in_hours
 
 HEAD_OFFICE_BRANCH = "Head Office"
-GRACE_MINUTES = 15
 ALLOWED_LATE_EARLY_PER_MONTH = 3
 
 # Core office hours
-CORE_IN_TIME = "10:00:00"
 LATE_ENTRY_FROM = "10:01:00"  # late mark starts from 10:01 AM (10:00:00–10:00:59 is on-time)
 WEEKDAY_FULL_DAY_OUT = "18:30:00"  # must work till 6:30 PM
 SATURDAY_FULL_DAY_OUT = "17:00:00"  # may leave by 5:00 PM
@@ -73,41 +71,6 @@ def is_exempt_from_head_office_policy(attendance):
 		getattr(attendance, "attendance_request", None)
 		or getattr(attendance, "leave_application", None)
 	)
-
-
-def get_expected_status_from_leave(leave_application, attendance_date, employee=None):
-	"""Status from approved Leave Application (not punch policy)."""
-	from frappe.utils import getdate
-
-	la = frappe.get_doc("Leave Application", leave_application)
-	att_date = getdate(attendance_date)
-
-	if la.half_day and getdate(la.half_day_date) == att_date:
-		half_day_status = "Absent"
-		if employee:
-			logs = get_checkin_logs(employee, att_date)
-			if logs:
-				wh, st, hds, _, _ = compute_head_office_status(
-					att_date, logs, leave_application=leave_application, employee=employee
-				)
-				if st == "Half Day" and hds == "Present":
-					half_day_status = "Present"
-		return "Half Day", half_day_status
-
-	if getdate(la.from_date) <= att_date <= getdate(la.to_date):
-		return "On Leave", ""
-
-	return None, None
-
-
-def get_expected_status_from_attendance_request(attendance_request, attendance_date):
-	"""Status from approved Attendance Request."""
-	from hrms.hr.doctype.attendance_request.attendance_request import AttendanceRequest
-
-	doc = frappe.get_doc("Attendance Request", attendance_request)
-	status = AttendanceRequest.get_attendance_status(doc, attendance_date)
-	half_day_status = "Absent" if status == "Half Day" else ""
-	return status, half_day_status
 
 
 def has_approved_half_day_leave(employee, attendance_date):
@@ -190,7 +153,7 @@ def is_beyond_allowed_early_exit(out_time, attendance_date):
 	return out_t < mandatory_out and out_t < grace_from
 
 
-def calc_working_hours(logs, attendance_date=None):
+def calc_working_hours(logs):
 	"""Sum IN→OUT segments. Lunch is not auto-deducted (early-exit allowance uses gross span)."""
 	working_hours = 0
 	last_in = None
@@ -276,17 +239,6 @@ def meets_second_half_timing(attendance_date, in_time, out_time):
 	)
 
 
-def meets_half_day_timing(attendance_date, in_time, out_time):
-	return meets_first_half_timing(attendance_date, in_time, out_time) or meets_second_half_timing(
-		attendance_date, in_time, out_time
-	)
-
-
-def get_violation_penalty_status(attendance_date, logs):
-	"""4th late/early and late beyond 15 min — company policy is always Absent."""
-	return "Absent", ""
-
-
 def _allows_second_half_half_day(leave_application, employee, attendance_date):
 	if leave_application:
 		return True
@@ -300,11 +252,9 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	if not logs:
 		return 0, None, None, 0, 0
 
-	working_hours = calc_working_hours(logs, attendance_date)
+	working_hours = calc_working_hours(logs)
 	in_dt = logs[0].time
 	out_dt = logs[-1].time
-	in_time = get_time(in_dt)
-	out_time = get_time(out_dt)
 	rules = get_rules(attendance_date)
 	late_entry, early_exit = check_late_entry_early_exit(in_dt, out_dt, attendance_date)
 
@@ -312,10 +262,18 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	final_half_day_status = ""
 	has_half_day_leave = _allows_second_half_half_day(leave_application, employee, attendance_date)
 
-	if is_beyond_allowed_early_exit(out_dt, attendance_date):
+	if is_beyond_allowed_late(in_dt) and not has_half_day_leave:
 		return working_hours, "Absent", "", 0, 0
 
-	if is_beyond_allowed_late(in_dt) and not has_half_day_leave:
+	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation)
+	if (
+		working_hours >= rules["min_half_day_hours"]
+		and working_hours < rules["full_day_hours"]
+		and meets_first_half_timing(attendance_date, in_dt, out_dt)
+	):
+		return working_hours, "Half Day", "Present", late_entry, early_exit
+
+	if is_beyond_allowed_early_exit(out_dt, attendance_date):
 		return working_hours, "Absent", "", 0, 0
 
 	# Full day Present: enough hours + on-time / allowed early out
@@ -325,11 +283,6 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	):
 		final_status = "Present"
 		final_half_day_status = ""
-	elif working_hours >= rules["min_half_day_hours"] and meets_first_half_timing(
-		attendance_date, in_dt, out_dt
-	):
-		final_status = "Half Day"
-		final_half_day_status = "Present"
 	elif (
 		working_hours >= rules["min_half_day_hours"]
 		and meets_second_half_timing(attendance_date, in_dt, out_dt)
