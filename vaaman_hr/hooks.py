@@ -29,7 +29,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+# doctype_js = {"doctype" : "public/js/salary_structure_assignment.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -176,7 +176,11 @@ doc_events = {
     },
     "Purchase Receipt": {
         "on_submit": "vaaman_hr.draft_purchase_invoice.auto_create_purchase_invoice"
+    },
+    "Salary Structure Assignment": {
+        "before_save": "vaaman_hr.vaaman_hr.salery_component_field_add_buttton.on_salary_assignment_update"
     }
+
 }
 
 
@@ -187,9 +191,9 @@ doc_events = {
 # 	"all": [
 # 		"vaaman_hr.tasks.all"
 # 	],
-# 	"daily": [
-# 		"vaaman_hr.tasks.daily"
-# 	],
+	# "daily": [
+	# 	"vaaman_hr.vaaman_hr.salery_component_field_add_buttton.update_history",
+	# ],
 # 	"hourly": [
 # 		"vaaman_hr.tasks.hourly"
 # 	],
@@ -216,7 +220,8 @@ doc_events = {
 
 scheduler_events = {
     "daily": [
-        "vaaman_hr.late_entry_atten.process_attendance_policy"
+        "vaaman_hr.late_entry_atten.process_attendance_policy",
+        "vaaman_hr.vaaman_hr.salery_component_field_add_buttton.update_history"
     ],
     "cron": {
         "*/5 * * * *": [
