@@ -1,316 +1,12 @@
-# from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
-# import frappe
-# from frappe.utils import getdate, flt, cint
-# from frappe.query_builder.functions import Count
-# from packaging import version
-# from datetime import timedelta
-
-# # ==========================================
-# # VERSION DETECTION
-# # ==========================================
-# HRMS_VERSION = version.parse(frappe.get_attr("hrms.__version__"))
-
-# # ==========================================
-# # HOLIDAY FUNCTION COMPATIBILITY
-# # ==========================================
-# try:
-#     # v16
-#     from hrms.hr.utils import get_holiday_dates_for_employee
-
-#     def get_employee_holidays(employee, start_date, end_date):
-#         return get_holiday_dates_for_employee(employee, start_date, end_date)
-
-# except ImportError:
-#     # v15 fallback
-#     from erpnext.setup.doctype.employee.employee import (
-#         get_holiday_list_for_employee,
-#     )
-#     from hrms.utils.holiday_list import get_holiday_dates_between
-
-#     def get_employee_holidays(employee, start_date, end_date):
-#         holiday_list = get_holiday_list_for_employee(employee)
-
-#         return get_holiday_dates_between(
-#             holiday_list,
-#             start_date,
-#             end_date,
-#         )
-
-
-# class CustomSalarySlip(ERPNextSalarySlip):
-
-#     # ==========================================
-#     # SAFE SUPER CALL FOR v15/v16
-#     # ==========================================
-#     def call_super_working_days(
-#         self,
-#         lwp=None,
-#         for_preview=0,
-#         lwp_days_corrected=None,
-#     ):
-
-#         if HRMS_VERSION.major >= 16:
-#             return super().get_working_days_details(
-#                 lwp,
-#                 for_preview,
-#                 lwp_days_corrected,
-#             )
-
-#         return super().get_working_days_details(
-#             lwp,
-#             for_preview,
-#         )
-
-#     # ==========================================
-#     # MAIN OVERRIDE
-#     # ==========================================
-#     def get_working_days_details(
-#         self,
-#         lwp=None,
-#         for_preview=0,
-#         lwp_days_corrected=None,
-#     ):
-#         """
-#         Custom logic applies ONLY when:
-#         Salary Structure Assignment.weekly_off_on_attendance = 1
-
-#         Otherwise ERPNext default behavior is used.
-#         """
-
-#         # ---------- BASIC SAFETY ----------
-#         if not self.employee:
-#             return self.call_super_working_days(
-#                 lwp,
-#                 for_preview,
-#                 lwp_days_corrected,
-#             )
-
-#         start_date = getdate(self.start_date)
-#         end_date = getdate(self.end_date)
-
-#         joining_date = (
-#             getdate(self.joining_date)
-#             if self.joining_date
-#             else None
-#         )
-
-#         relieving_date = (
-#             getdate(self.relieving_date)
-#             if self.relieving_date
-#             else None
-#         )
-
-#         # ---------- FETCH SSA ----------
-#         ssa = frappe.db.get_value(
-#             "Salary Structure Assignment",
-#             {
-#                 "employee": self.employee,
-#                 "from_date": ["<=", end_date],
-#                 "docstatus": 1,
-#             },
-#             [
-#                 "weekly_off_on_attendance",
-#                 "override_weekly_off_with_absent",
-#                 "custom_current_month_joining",
-#             ],
-#             order_by="from_date desc",
-#         )
-
-#         # ---------- FALLBACK TO ERPNext ----------
-#         if not ssa:
-#             return self.call_super_working_days(
-#                 lwp,
-#                 for_preview,
-#                 lwp_days_corrected,
-#             )
-
-#          weekly_off_on_attendance, override_absent_on_holiday, current_month_joining = ssa
-
-#         if not cint(weekly_off_on_attendance):
-#             return self.call_super_working_days(
-#                 lwp,
-#                 for_preview,
-#                 lwp_days_corrected,
-#             )
-
-#         override_absent_on_holiday = cint(
-#             override_absent_on_holiday or 0
-#         )
-
-#         # ---------- PREVIEW MODE ----------
-#         if for_preview:
-#             total_days = (end_date - start_date).days + 1
-
-#             self.total_working_days = total_days
-#             self.payment_days = total_days
-#             self.absent_days = 0
-#             self.leave_without_pay = 0
-
-#             return
-
-#         # ==========================================
-#         # CUSTOM LOGIC
-#         # ==========================================
-
-#         holidays = get_employee_holidays(
-#             self.employee,
-#             start_date,
-#             end_date,
-#         )
-
-#         period_start = (
-#             max(start_date, joining_date)
-#             if joining_date
-#             else start_date
-#         )
-
-#         period_end = (
-#             min(end_date, relieving_date)
-#             if relieving_date
-#             else end_date
-#         )
-
-#         if period_end < period_start:
-#             total_working_days = 0
-#         else:
-#             total_working_days = (
-#                 period_end - period_start
-#             ).days + 1
-
-#         # ---------- BULK ATTENDANCE QUERY ----------
-#         attendance_rows = frappe.get_all(
-#             "Attendance",
-#             filters={
-#                 "employee": self.employee,
-#                 "attendance_date": [
-#                     "between",
-#                     [period_start, period_end],
-#                 ],
-#                 "docstatus": 1,
-#             },
-#             fields=[
-#                 "attendance_date",
-#                 "status",
-#                 "leave_type",
-#                 "half_day_status",
-#             ],
-#         )
-
-#         attendance_by_date = {
-#             getdate(row.attendance_date): row
-#             for row in attendance_rows
-#         }
-        
-        
-#         # ---------- PAYROLL SETTINGS ----------
-#         payroll_settings = frappe.db.get_singles_dict("Payroll Settings")
-#         consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")
-#         daily_wages_fraction_for_half_day = flt(payroll_settings.get("daily_wages_fraction_for_half_day")) or 0.5
-
-#         # ---------- ABSENT COUNT ----------
-#         absent_days = 0
-
-#         current_date = period_start
-#         while current_date <= period_end:
-#             is_holiday = current_date in holidays
-#             row = attendance_by_date.get(current_date)
-#             status = row.status if row else None
-
-#             if status == "Absent":
-#                 if override_absent_on_holiday or not is_holiday:
-#                     absent_days += 1
-#             elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
-#                 absent_days += 1
-
-#             current_date += timedelta(days=1)
-
-#         # ---------- HALF DAY ABSENT (HRMS DEFAULT LOGIC) ----------
-#         Attendance = frappe.qb.DocType("Attendance")
-#         half_day_query = (
-#             frappe.qb.from_(Attendance)
-#             .select(Count("*"))
-#             .where(
-#                 (Attendance.employee == self.employee)
-#                 & (Attendance.attendance_date.between(period_start, period_end))
-#                 & (Attendance.docstatus == 1)
-#                 & (Attendance.status == "Half Day")
-#                 & (Attendance.half_day_status == "Absent")
-#             )
-#         )
-
-#         if not override_absent_on_holiday and holidays:
-#             half_day_query = half_day_query.where(
-#                 Attendance.attendance_date.notin(holidays)
-#             )
-
-#         half_absent_days = half_day_query.run()[0][0]
-#         absent_days += half_absent_days * daily_wages_fraction_for_half_day
-
-#         # ---------- PAID LEAVES ----------
-#         PAID_LEAVE_TYPES = {
-#             "Compensatory Off",
-#             "Maternity Leave",
-#             "Special Leave",
-#             "Privilege Leave",
-#             "Sick Leave",
-#             "Casual Leave",
-#             "Sick Leave - Zinc",
-#             "Festival Leave",
-#         }
-
-#         paid_leaves = 0
-#         for row in attendance_by_date.values():
-#             if row.leave_type in PAID_LEAVE_TYPES:
-#                 if row.status == "On Leave":
-#                     paid_leaves += 1
-#                 elif row.status == "Half Day":
-#                     paid_leaves += 0.5
-
-#         self.custom_paid_leaves = paid_leaves
-
-#         # ---------- FINAL VALUES ----------
-#         self.total_working_days = total_working_days
-
-#         self.absent_days = max(
-#             0,
-#             absent_days,
-#         )
-
-#         self.leave_without_pay = flt(lwp or 0)
-
-#         self.payment_days = max(
-#             0,
-#             flt(self.total_working_days)
-#             - flt(self.absent_days)
-#             - flt(self.leave_without_pay),
-#         )
-
-#         # ==========================================
-#         # v16 PAYROLL CORRECTION SUPPORT
-#         # ==========================================
-#         if (
-#             HRMS_VERSION.major >= 16
-#             and lwp_days_corrected
-#             and lwp_days_corrected > 0
-#         ):
-
-#             from hrms.payroll.doctype.salary_slip.salary_slip import (
-#                 verify_lwp_days_corrected,
-#             )
-
-#             if verify_lwp_days_corrected(
-#                 self.employee,
-#                 self.start_date,
-#                 self.end_date,
-#                 lwp_days_corrected,
-#             ):
-#                 self.payment_days += lwp_days_corrected
-from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
-import frappe
-from frappe.utils import getdate, flt, cint
-from frappe.query_builder.functions import Count
-from packaging import version
 from datetime import timedelta
+
+import frappe
+from frappe import _
+from frappe.query_builder.functions import Count
+from frappe.utils import cint, flt, getdate
+from packaging import version
+
+from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
 
 # ==========================================
 # VERSION DETECTION
@@ -321,351 +17,414 @@ HRMS_VERSION = version.parse(frappe.get_attr("hrms.__version__"))
 # HOLIDAY FUNCTION COMPATIBILITY
 # ==========================================
 try:
-    # v16
-    from hrms.hr.utils import get_holiday_dates_for_employee
+	from hrms.hr.utils import get_holiday_dates_for_employee
 
-    def get_employee_holidays(employee, start_date, end_date):
-        return get_holiday_dates_for_employee(employee, start_date, end_date)
+	def get_employee_holidays(employee, start_date, end_date):
+		return get_holiday_dates_for_employee(employee, start_date, end_date)
 
 except ImportError:
-    # v15 fallback
-    from erpnext.setup.doctype.employee.employee import (
-        get_holiday_list_for_employee,
-    )
-    from hrms.utils.holiday_list import get_holiday_dates_between
+	from erpnext.setup.doctype.employee.employee import get_holiday_list_for_employee
+	from hrms.utils.holiday_list import get_holiday_dates_between
 
-    def get_employee_holidays(employee, start_date, end_date):
-        holiday_list = get_holiday_list_for_employee(employee)
-
-        return get_holiday_dates_between(
-            holiday_list,
-            start_date,
-            end_date,
-        )
+	def get_employee_holidays(employee, start_date, end_date):
+		holiday_list = get_holiday_list_for_employee(employee)
+		return get_holiday_dates_between(holiday_list, start_date, end_date)
 
 
-# ==========================================
-# HOLIDAY LIST NAME COMPATIBILITY
-# ==========================================
 def get_employee_holiday_list_name(employee, start_date, end_date):
-    """
-    v15: holiday list is stored directly on the Employee record.
-    v16: holiday list is managed via Holiday List Assignment.
-         One assignment is active at a time — a newer from_date supersedes
-         the older one (no to_date field).
-    """
-    if HRMS_VERSION.major >= 16:
-        return frappe.db.get_value(
-            "Holiday List Assignment",
-            {
-                "applicable_for": "Employee",
-                "assigned_to": employee,
-                "from_date": ["<=", end_date],
-                "docstatus": 1,
-            },
-            "holiday_list",
-            order_by="from_date desc",
-        )
+	"""v15: holiday list on Employee. v16: Holiday List Assignment."""
+	if HRMS_VERSION.major >= 16:
+		return frappe.db.get_value(
+			"Holiday List Assignment",
+			{
+				"applicable_for": "Employee",
+				"assigned_to": employee,
+				"from_date": ["<=", end_date],
+				"docstatus": 1,
+			},
+			"holiday_list",
+			order_by="from_date desc",
+		)
 
-    return frappe.db.get_value("Employee", employee, "holiday_list")
+	return frappe.db.get_value("Employee", employee, "holiday_list")
+
+
+PAID_LEAVE_TYPES = {
+	"Compensatory Off",
+	"Maternity Leave",
+	"Special Leave",
+	"Privilege Leave",
+	"Sick Leave",
+	"Casual Leave",
+	"Sick Leave - Zinc",
+	"Festival Leave",
+}
 
 
 class CustomSalarySlip(ERPNextSalarySlip):
 
-    # ==========================================
-    # SAFE SUPER CALL FOR v15/v16
-    # ==========================================
-    def call_super_working_days(
-        self,
-        lwp=None,
-        for_preview=0,
-        lwp_days_corrected=None,
-    ):
+	def call_super_working_days(self, lwp=None, for_preview=0, lwp_days_corrected=None):
+		if HRMS_VERSION.major >= 16:
+			return super().get_working_days_details(lwp, for_preview, lwp_days_corrected)
 
-        if HRMS_VERSION.major >= 16:
-            return super().get_working_days_details(
-                lwp,
-                for_preview,
-                lwp_days_corrected,
-            )
+		return super().get_working_days_details(lwp, for_preview)
 
-        return super().get_working_days_details(
-            lwp,
-            for_preview,
-        )
+	def _get_payroll_settings(self):
+		return frappe.get_cached_value(
+			"Payroll Settings",
+			None,
+			(
+				"payroll_based_on",
+				"include_holidays_in_total_working_days",
+				"consider_marked_attendance_on_holidays",
+				"daily_wages_fraction_for_half_day",
+				"consider_unmarked_attendance_as",
+			),
+			as_dict=1,
+		)
 
-    # ==========================================
-    # MAIN OVERRIDE
-    # ==========================================
-    def get_working_days_details(
-        self,
-        lwp=None,
-        for_preview=0,
-        lwp_days_corrected=None,
-    ):
-        """
-        Custom logic applies ONLY when:
-        Salary Structure Assignment.weekly_off_on_attendance = 1
+	def _is_worker_structure(self, salary_structure):
+		return salary_structure and "worker" in salary_structure.lower()
 
-        Otherwise ERPNext default behavior is used.
-        """
+	def _is_current_month_joining(self, start_date=None, end_date=None, joining_date=None, ssa_flag=0):
+		"""True when DOJ falls in this payroll month (auto). SSA flag is fallback only if DOJ is missing."""
+		start_date = getdate(start_date or self.start_date)
+		end_date = getdate(end_date or self.end_date)
+		if joining_date:
+			joining_date = getdate(joining_date)
+		elif self.joining_date:
+			joining_date = getdate(self.joining_date)
+		else:
+			joining_date = None
 
-        # ---------- BASIC SAFETY ----------
-        if not self.employee:
-            return self.call_super_working_days(
-                lwp,
-                for_preview,
-                lwp_days_corrected,
-            )
+		if joining_date and start_date <= joining_date <= end_date:
+			return True
+		return bool(cint(ssa_flag)) if not joining_date else False
 
-        start_date = getdate(self.start_date)
-        end_date = getdate(self.end_date)
+	def get_data_for_eval(self):
+		data, default_data = super().get_data_for_eval()
+		is_join_month = self._is_current_month_joining(
+			ssa_flag=data.get("custom_current_month_joining")
+		)
+		data.custom_current_month_joining = 1 if is_join_month else 0
+		default_data.custom_current_month_joining = data.custom_current_month_joining
+		if self.joining_date:
+			joining_date = getdate(self.joining_date)
+			data.joining_date = joining_date
+			default_data.joining_date = joining_date
+		return data, default_data
 
-        joining_date = (
-            getdate(self.joining_date)
-            if self.joining_date
-            else None
-        )
+	def _count_payable_attendance_days(
+		self,
+		attendance_by_date,
+		period_start,
+		period_end,
+		holidays,
+		consider_unmarked_as,
+		daily_wages_fraction_for_half_day,
+		is_staff=False,
+		national_holiday_dates=None,
+	):
+		"""Paid days = Present + paid leaves + half-days; excludes absent, LWP, weekly off.
 
-        relieving_date = (
-            getdate(self.relieving_date)
-            if self.relieving_date
-            else None
-        )
+		Unmarked national holidays on the employee calendar count as paid for all employees.
+		If leave, present, or absent is marked on that date, attendance rules apply instead
+		(workers who did not work on a national holiday are marked Absent).
+		"""
+		national_holiday_dates = national_holiday_dates or set()
+		leave_type_map = self.get_leave_type_map()
+		payable_days = 0
+		current_date = period_start
 
-        # ---------- FETCH SSA ----------
-        ssa = frappe.db.get_value(
-            "Salary Structure Assignment",
-            {
-                "employee": self.employee,
-                "from_date": ["<=", end_date],
-                "docstatus": 1,
-            },
-            [
-                "weekly_off_on_attendance",
-                "override_weekly_off_with_absent",
-                "custom_current_month_joining",
-            ],
-            order_by="from_date desc",
-        )
+		while current_date <= period_end:
+			is_holiday = current_date in holidays
+			row = attendance_by_date.get(current_date)
 
-        # ---------- FALLBACK TO ERPNext ----------
-        if not ssa:
-            return self.call_super_working_days(
-                lwp,
-                for_preview,
-                lwp_days_corrected,
-            )
+			if row:
+				status = row.status
+				if status == "Present":
+					payable_days += 1
+				elif status == "Work From Home":
+					payable_days += 1
+				elif status == "Weekly Off":
+					pass
+				elif status == "On Leave":
+					leave_type = row.leave_type
+					if leave_type in leave_type_map and (
+						leave_type_map[leave_type].get("is_lwp") or leave_type_map[leave_type].get("is_ppl")
+					):
+						pass
+					elif leave_type in PAID_LEAVE_TYPES or not leave_type:
+						payable_days += 1
+				elif status == "Half Day":
+					if row.half_day_status == "Absent":
+						# Present for half the day; other half is absent.
+						payable_days += daily_wages_fraction_for_half_day
+					elif row.leave_type in leave_type_map and (
+						leave_type_map[row.leave_type].get("is_lwp")
+						or leave_type_map[row.leave_type].get("is_ppl")
+					):
+						payable_days += 1 - daily_wages_fraction_for_half_day
+					else:
+						payable_days += daily_wages_fraction_for_half_day
+			elif current_date in national_holiday_dates:
+				payable_days += 1
+			elif consider_unmarked_as == "Present" and not is_holiday:
+				if is_staff and current_date.weekday() == 6:
+					pass
+				else:
+					payable_days += 1
 
-        weekly_off_on_attendance, override_absent_on_holiday, current_month_joining = ssa
+			current_date += timedelta(days=1)
 
-        if not cint(weekly_off_on_attendance):
-            return self.call_super_working_days(
-                lwp,
-                for_preview,
-                lwp_days_corrected,
-            )
+		return payable_days
 
-        override_absent_on_holiday = cint(
-            override_absent_on_holiday or 0
-        )
+	def _calculate_actual_lwp(self, payroll_settings, holidays, period_start, period_end):
+		"""Use standard HRMS LWP/PPL calculation from Leave Type master."""
+		if not payroll_settings.payroll_based_on:
+			frappe.throw(_("Please set Payroll based on in Payroll settings"))
 
-        # ---------- PREVIEW MODE ----------
-        if for_preview:
-            total_days = (end_date - start_date).days + 1
+		daily_wages_fraction_for_half_day = (
+			flt(payroll_settings.daily_wages_fraction_for_half_day) or 0.5
+		)
+		consider_marked_attendance_on_holidays = (
+			payroll_settings.include_holidays_in_total_working_days
+			and payroll_settings.consider_marked_attendance_on_holidays
+		)
+		holidays_list = list(holidays)
 
-            self.total_working_days = total_days
-            self.payment_days = total_days
-            self.absent_days = 0
-            self.leave_without_pay = 0
+		if payroll_settings.payroll_based_on == "Attendance":
+			return self.calculate_lwp_ppl_and_absent_days_based_on_attendance(
+				holidays_list,
+				daily_wages_fraction_for_half_day,
+				consider_marked_attendance_on_holidays,
+			)[0]
 
-            return
+		period_days = (period_end - period_start).days + 1
+		working_days_list = [period_start + timedelta(days=day) for day in range(period_days)]
 
-        # ==========================================
-        # CUSTOM LOGIC
-        # ==========================================
+		return self.calculate_lwp_or_ppl_based_on_leave_application(
+			holidays_list,
+			working_days_list,
+			daily_wages_fraction_for_half_day,
+		)
 
-        holidays = get_employee_holidays(
-            self.employee,
-            start_date,
-            end_date,
-        )
+	def get_working_days_details(self, lwp=None, for_preview=0, lwp_days_corrected=None):
+		"""
+		Custom logic applies ONLY when:
+		Salary Structure Assignment.weekly_off_on_attendance = 1
 
-        period_start = (
-            max(start_date, joining_date)
-            if joining_date
-            else start_date
-        )
+		Otherwise ERPNext default behavior is used.
+		"""
+		if not self.employee:
+			return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
 
-        period_end = (
-            min(end_date, relieving_date)
-            if relieving_date
-            else end_date
-        )
+		start_date = getdate(self.start_date)
+		end_date = getdate(self.end_date)
+		joining_date = getdate(self.joining_date) if self.joining_date else None
+		relieving_date = getdate(self.relieving_date) if self.relieving_date else None
 
-        if period_end < period_start:
-            total_working_days = 0
-        else:
-            total_working_days = (
-                period_end - period_start
-            ).days + 1
+		ssa = frappe.db.get_value(
+			"Salary Structure Assignment",
+			{
+				"employee": self.employee,
+				"from_date": ["<=", end_date],
+				"docstatus": 1,
+			},
+			[
+				"weekly_off_on_attendance",
+				"override_weekly_off_with_absent",
+				"mark_absent_on_public_holiday",
+				"custom_current_month_joining",
+				"salary_structure",
+			],
+			order_by="from_date desc",
+		)
 
-        # ---------- BULK ATTENDANCE QUERY ----------
-        attendance_rows = frappe.get_all(
-            "Attendance",
-            filters={
-                "employee": self.employee,
-                "attendance_date": [
-                    "between",
-                    [period_start, period_end],
-                ],
-                "docstatus": 1,
-            },
-            fields=[
-                "attendance_date",
-                "status",
-                "leave_type",
-                "half_day_status",
-            ],
-        )
+		if not ssa:
+			return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
 
-        attendance_by_date = {
-            getdate(row.attendance_date): row
-            for row in attendance_rows
-        }
+		(
+			weekly_off_on_attendance,
+			override_absent_on_holiday,
+			mark_absent_on_public_holiday,
+			current_month_joining,
+			salary_structure,
+		) = ssa
 
+		if not cint(weekly_off_on_attendance):
+			return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
 
-        # ---------- PAYROLL SETTINGS ----------
-        payroll_settings = frappe.db.get_singles_dict("Payroll Settings")
-        consider_unmarked_as = payroll_settings.get("consider_unmarked_attendance_as")
-        daily_wages_fraction_for_half_day = flt(payroll_settings.get("daily_wages_fraction_for_half_day")) or 0.5
+		override_absent_on_holiday = cint(override_absent_on_holiday or 0)
+		mark_absent_on_public_holiday = cint(mark_absent_on_public_holiday or 0)
 
-        # ---------- HOLIDAY DATES (PPH & ABSENT LOGIC) ----------
-        holiday_list_name = get_employee_holiday_list_name(
-            self.employee, period_start, period_end
-        )
+		if for_preview:
+			total_days = (end_date - start_date).days + 1
+			self.total_working_days = total_days
+			self.payment_days = total_days
+			self.absent_days = 0
+			self.leave_without_pay = 0
+			return
 
-        all_holiday_dates = set()
-        pph_holiday_dates = set()  # public holidays only (weekly_off = 0)
+		payroll_settings = self._get_payroll_settings()
+		daily_wages_fraction_for_half_day = (
+			flt(payroll_settings.daily_wages_fraction_for_half_day) or 0.5
+		)
+		consider_unmarked_as = payroll_settings.consider_unmarked_attendance_as
 
-        if holiday_list_name:
-            raw = frappe.db.get_all(
-                "Holiday",
-                filters={
-                    "parent": holiday_list_name,
-                    "holiday_date": ["between", [period_start, period_end]],
-                },
-                fields=["holiday_date", "weekly_off"],
-            )
-            all_holiday_dates = {getdate(r.holiday_date) for r in raw}
-            pph_holiday_dates = {getdate(r.holiday_date) for r in raw if not r.weekly_off}
+		period_start = max(start_date, joining_date) if joining_date else start_date
+		period_end = min(end_date, relieving_date) if relieving_date else end_date
 
-        holidays = set(holidays) | all_holiday_dates
+		if period_end < period_start:
+			total_working_days = 0
+		elif self._is_current_month_joining(start_date, end_date, joining_date, current_month_joining):
+			total_working_days = (end_date - start_date).days + 1
+		else:
+			total_working_days = (period_end - period_start).days + 1
 
-        # ---------- ABSENT COUNT ----------
-        absent_days = 0
+		holidays = set(get_employee_holidays(self.employee, start_date, end_date))
 
-        current_date = period_start
-        while current_date <= period_end:
-            is_holiday = current_date in holidays
-            row = attendance_by_date.get(current_date)
-            status = row.status if row else None
+		holiday_list_name = get_employee_holiday_list_name(self.employee, period_start, period_end)
+		pph_holiday_dates = set()
 
-            if status == "Absent":
-                absent_days += 1
-            elif status is None and consider_unmarked_as == "Absent" and not is_holiday:
-                absent_days += 1
+		if holiday_list_name:
+			raw = frappe.db.get_all(
+				"Holiday",
+				filters={
+					"parent": holiday_list_name,
+					"holiday_date": ["between", [period_start, period_end]],
+				},
+				fields=["holiday_date", "weekly_off"],
+			)
+			pph_holiday_dates = {getdate(row.holiday_date) for row in raw if not row.weekly_off}
+			holidays |= pph_holiday_dates | {
+				getdate(row.holiday_date) for row in raw if row.weekly_off
+			}
 
-            current_date += timedelta(days=1)
+		attendance_rows = frappe.get_all(
+			"Attendance",
+			filters={
+				"employee": self.employee,
+				"attendance_date": ["between", [period_start, period_end]],
+				"docstatus": 1,
+			},
+			fields=["attendance_date", "status", "leave_type", "half_day_status"],
+		)
+		attendance_by_date = {getdate(row.attendance_date): row for row in attendance_rows}
 
-        # ---------- HALF DAY ABSENT (HRMS DEFAULT LOGIC) ----------
-        Attendance = frappe.qb.DocType("Attendance")
-        half_day_query = (
-            frappe.qb.from_(Attendance)
-            .select(Count("*"))
-            .where(
-                (Attendance.employee == self.employee)
-                & (Attendance.attendance_date.between(period_start, period_end))
-                & (Attendance.docstatus == 1)
-                & (Attendance.status == "Half Day")
-                & (Attendance.half_day_status == "Absent")
-            )
-        )
+		# When current-month joiners use the full payroll month as working days,
+		# unmarked days before DOJ must still reduce payment days.
+		is_join_month = self._is_current_month_joining(
+			start_date, end_date, joining_date, current_month_joining
+		)
+		attendance_count_start = start_date if is_join_month else period_start
 
-        if not override_absent_on_holiday and holidays:
-            half_day_query = half_day_query.where(
-                Attendance.attendance_date.notin(holidays)
-            )
+		absent_days = 0
+		unmarked_days = 0
+		current_date = attendance_count_start
+		while current_date <= period_end:
+			is_holiday = current_date in holidays
+			row = attendance_by_date.get(current_date)
+			status = row.status if row else None
 
-        half_absent_days = half_day_query.run()[0][0]
-        absent_days += half_absent_days * daily_wages_fraction_for_half_day
+			if status == "Absent":
+				if (
+					mark_absent_on_public_holiday
+					and current_date in pph_holiday_dates
+				):
+					absent_days += 1
+				elif override_absent_on_holiday or not is_holiday:
+					absent_days += 1
+			elif status is None:
+				if not is_holiday:
+					unmarked_days += 1
+					if consider_unmarked_as == "Absent":
+						absent_days += 1
 
-        # ---------- PAID LEAVES ----------
-        PAID_LEAVE_TYPES = {
-            "Compensatory Off",
-            "Maternity Leave",
-            "Special Leave",
-            "Privilege Leave",
-            "Sick Leave",
-            "Casual Leave",
-            "Sick Leave - Zinc",
-            "Festival Leave",
-        }
+			current_date += timedelta(days=1)
 
-        paid_leaves = 0
-        for row in attendance_by_date.values():
-            if row.leave_type in PAID_LEAVE_TYPES:
-                if row.status == "On Leave":
-                    paid_leaves += 1
-                elif row.status == "Half Day":
-                    paid_leaves += 0.5
+		Attendance = frappe.qb.DocType("Attendance")
+		half_day_query = (
+			frappe.qb.from_(Attendance)
+			.select(Count("*"))
+			.where(
+				(Attendance.employee == self.employee)
+				& (Attendance.attendance_date.between(period_start, period_end))
+				& (Attendance.docstatus == 1)
+				& (Attendance.status == "Half Day")
+				& (Attendance.half_day_status == "Absent")
+			)
+		)
 
-        self.custom_paid_leaves = paid_leaves
+		if not override_absent_on_holiday and holidays:
+			half_day_query = half_day_query.where(Attendance.attendance_date.notin(list(holidays)))
 
-        pph = 0
-        for date, row in attendance_by_date.items():
-            if date in pph_holiday_dates and row.status in ["Present", "Half Day"]:
-                pph += 1
+		half_absent_days = half_day_query.run()[0][0]
+		absent_days += half_absent_days * daily_wages_fraction_for_half_day
 
-        self.custom_pph = pph
+		self.custom_pph = sum(
+			1
+			for date, row in attendance_by_date.items()
+			if date in pph_holiday_dates and row.status in ("Present", "Half Day")
+		)
 
-        # ---------- FINAL VALUES ----------
-        self.total_working_days = total_working_days
+		paid_leaves = 0
+		for row in attendance_by_date.values():
+			if row.leave_type in PAID_LEAVE_TYPES:
+				if row.status == "On Leave":
+					paid_leaves += 1
+				elif row.status == "Half Day":
+					paid_leaves += daily_wages_fraction_for_half_day
 
-        self.absent_days = max(
-            0,
-            absent_days,
-        )
+		self.custom_paid_leaves = paid_leaves
 
-        self.leave_without_pay = flt(lwp or 0)
+		actual_lwp = self._calculate_actual_lwp(payroll_settings, holidays, period_start, period_end)
 
-        self.payment_days = max(
-            0,
-            flt(self.total_working_days)
-            - flt(self.absent_days)
-            - flt(self.leave_without_pay),
-        )
+		if not lwp:
+			lwp = actual_lwp
+		elif flt(lwp) != flt(actual_lwp):
+			frappe.msgprint(
+				_("Leave Without Pay does not match with approved {} records").format(
+					payroll_settings.payroll_based_on
+				)
+			)
 
-        if cint(current_month_joining):
-            self.total_working_days = (end_date - start_date).days + 1
+		self.total_working_days = total_working_days
+		self.absent_days = max(0, absent_days)
+		self.unmarked_days = max(0, unmarked_days)
+		self.leave_without_pay = flt(lwp)
 
-        # ==========================================
-        # v16 PAYROLL CORRECTION SUPPORT
-        # ==========================================
-        if (
-            HRMS_VERSION.major >= 16
-            and lwp_days_corrected
-            and lwp_days_corrected > 0
-        ):
+		is_worker = self._is_worker_structure(salary_structure)
 
-            from hrms.payroll.doctype.salary_slip.salary_slip import (
-                verify_lwp_days_corrected,
-            )
+		payable_days = self._count_payable_attendance_days(
+			attendance_by_date,
+			period_start,
+			period_end,
+			holidays,
+			consider_unmarked_as,
+			daily_wages_fraction_for_half_day,
+			is_staff=not is_worker,
+			national_holiday_dates=pph_holiday_dates,
+		)
 
-            if verify_lwp_days_corrected(
-                self.employee,
-                self.start_date,
-                self.end_date,
-                lwp_days_corrected,
-            ):
-                self.payment_days += lwp_days_corrected
+		if is_worker:
+			self.payment_days = max(
+				0,
+				flt(self.total_working_days) - flt(self.absent_days) - flt(self.leave_without_pay),
+			)
+		else:
+			self.payment_days = max(0, flt(payable_days))
+
+		if HRMS_VERSION.major >= 16 and lwp_days_corrected and lwp_days_corrected > 0:
+			try:
+				from hrms.payroll.doctype.salary_slip.salary_slip import verify_lwp_days_corrected
+
+				if verify_lwp_days_corrected(
+					self.employee,
+					self.start_date,
+					self.end_date,
+					lwp_days_corrected,
+				):
+					self.payment_days += lwp_days_corrected
+			except ImportError:
+				pass
