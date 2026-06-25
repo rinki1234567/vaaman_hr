@@ -17,29 +17,33 @@ def calculate_compensatory_leave(doc, method):
 
 
 def get_existing_allocation_for_date(employee, comp_leave_valid_from):
-    """Active Leave Allocation for Compensatory Off covering valid_from."""
-    leave_allocation = frappe.db.sql(
-        """
-        SELECT name
-        FROM `tabLeave Allocation`
-        WHERE employee = %(employee)s
-            AND leave_type = %(leave_type)s
-            AND docstatus = 1
-            AND %(comp_leave_valid_from)s BETWEEN from_date AND to_date
-        ORDER BY from_date DESC
-        LIMIT 1
-        """,
-        {
-            "employee": employee,
-            "leave_type": "Compensatory Off",
-            "comp_leave_valid_from": comp_leave_valid_from,
-        },
-        as_dict=True,
-    )
+	"""Active Leave Allocation for Compensatory Off overlapping the validity window."""
+	valid_from = getdate(comp_leave_valid_from)
+	valid_to = add_days(valid_from, 59)
+	leave_allocation = frappe.db.sql(
+		"""
+		SELECT name
+		FROM `tabLeave Allocation`
+		WHERE employee = %(employee)s
+			AND leave_type = %(leave_type)s
+			AND docstatus = 1
+			AND to_date >= %(valid_from)s
+			AND from_date <= %(valid_to)s
+		ORDER BY from_date DESC
+		LIMIT 1
+		""",
+		{
+			"employee": employee,
+			"leave_type": "Compensatory Off",
+			"valid_from": valid_from,
+			"valid_to": valid_to,
+		},
+		as_dict=True,
+	)
 
-    if leave_allocation:
-        return frappe.get_doc("Leave Allocation", leave_allocation[0].name)
-    return None
+	if leave_allocation:
+		return frappe.get_doc("Leave Allocation", leave_allocation[0].name)
+	return None
 
 
 def get_comp_leave_validity_period(start_date):
