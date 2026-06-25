@@ -367,6 +367,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
 			for date, row in attendance_by_date.items()
 			if date in pph_holiday_dates and row.status in ("Present", "Half Day")
 		)
+		self.custom_public_holiday = len(pph_holiday_dates)
 
 		paid_leaves = 0
 		for row in attendance_by_date.values():
