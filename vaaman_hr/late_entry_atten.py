@@ -39,9 +39,16 @@ def _head_office_attendance_query(from_date, extra_conditions=""):
 
 
 def _amend_attendance_to_absent(record, reason, log_remarks, logs=None):
-	"""Amend attendance to Absent for policy violations (4th late/early, beyond 15-min late/early)."""
+	"""Mark attendance Absent in-place for policy violations (4th late/early, beyond 15-min late/early).
+
+	Updates the existing submitted Attendance document directly (like Attendance Request),
+	instead of cancel + amend, so no cancelled-document chain is created.
+	"""
 	original = frappe.get_doc("Attendance", record.name)
 	if is_exempt_from_head_office_policy(original):
+		return None
+
+	if original.status == "Absent" and not original.late_entry and not original.early_exit:
 		return None
 
 	if logs is None:
@@ -49,37 +56,34 @@ def _amend_attendance_to_absent(record, reason, log_remarks, logs=None):
 
 	working_hours = calc_working_hours(logs) if logs else flt(original.working_hours)
 
-	if original.docstatus == 1:
-		original.cancel()
+	frappe.db.set_value(
+		"Attendance",
+		original.name,
+		{
+			"status": "Absent",
+			"half_day_status": "",
+			"working_hours": working_hours,
+			"late_entry": 0,
+			"early_exit": 0,
+		},
+		update_modified=False,
+	)
 
-	amended_att = frappe.copy_doc(original)
-	amended_att.docstatus = 1
-	amended_att.status = "Absent"
-	amended_att.half_day_status = ""
-	amended_att.working_hours = working_hours
-	amended_att.late_entry = 0
-	amended_att.early_exit = 0
-	amended_att.amended_from = original.name
-	frappe.flags.skip_head_office_attendance_validation = True
-	try:
-		amended_att.save(ignore_permissions=True)
-	finally:
-		frappe.flags.skip_head_office_attendance_validation = False
-
-	amended_att.add_comment("Comment", reason)
+	original.add_comment("Comment", reason)
 
 	frappe.get_doc(
 		{
 			"doctype": "Attendance Policy Log",
 			"employee": original.employee,
-			"attendance": amended_att.name,
-			"attendance_date": amended_att.attendance_date,
+			"attendance": original.name,
+			"attendance_date": original.attendance_date,
 			"action_taken": "Converted to Absent",
 			"remarks": log_remarks,
 		}
 	).insert(ignore_permissions=True)
 
-	return amended_att
+	original.reload()
+	return original
 
 
 def process_immediate_policy_violations(from_date="2026-04-01"):

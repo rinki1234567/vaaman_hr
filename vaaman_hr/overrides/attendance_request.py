@@ -55,6 +55,24 @@ class CustomAttendanceRequest(AttendanceRequest):
 
         return super().should_mark_attendance(attendance_date)
 
+    def get_attendance_doc(self, attendance_date):
+        # When the request has no shift, match any existing (non-cancelled) attendance
+        # for the same employee + date regardless of its shift, so the base class updates
+        # it (e.g. Absent -> Half Day) instead of creating a duplicate that the custom
+        # Attendance duplicate guard would reject.
+        if not self.shift:
+            existing = frappe.db.exists(
+                "Attendance",
+                {
+                    "employee": self.employee,
+                    "attendance_date": attendance_date,
+                    "docstatus": ("!=", 2),
+                },
+            )
+            return frappe.get_doc("Attendance", existing) if existing else None
+
+        return super().get_attendance_doc(attendance_date)
+
     def create_or_update_attendance(self, date: str):
         doc = self.get_attendance_doc(date)
         if doc:
