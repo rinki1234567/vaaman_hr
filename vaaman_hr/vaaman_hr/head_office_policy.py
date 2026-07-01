@@ -20,6 +20,9 @@ WEEKDAY_EARLY_EXIT_UNTIL = "18:29:00"  # last allowed early out minute (6:30:00�
 SATURDAY_EARLY_EXIT_BEFORE = "16:45:00"  # earliest allowed Saturday early out (15 min before 5:00 PM)
 SATURDAY_EARLY_EXIT_UNTIL = "16:59:00"  # last allowed Saturday early out minute (5:00:00–5:00:59 is on-time)
 
+# 15-min late/early grace: if either flag applies, required net hours drop by this once (not twice).
+GRACE_HOURS_REDUCTION = 0.25
+
 POLICY = {
 	"weekday": {
 		"full_day_hours": 8.0,  # net work hours (10:00–6:30 span; lunch not auto-deducted from punches)
@@ -48,6 +51,31 @@ def is_saturday(attendance_date):
 
 def get_rules(attendance_date):
 	return POLICY["saturday"] if is_saturday(attendance_date) else POLICY["weekday"]
+
+
+def _policy_minute(dt):
+	"""Policy boundaries use hour:minute only; seconds are ignored (10:15:59 = 10:15)."""
+	t = get_time(dt)
+	return t.hour * 60 + t.minute
+
+
+def _bound_minute(time_str):
+	t = get_time(time_str)
+	return t.hour * 60 + t.minute
+
+
+def get_required_full_day_hours(attendance_date, late_entry=0, early_exit=0):
+	"""Net hours needed for full-day Present.
+
+	On-time IN/OUT: weekday 8.0 hr, Saturday 6.5 hr.
+	Allowed late (10:01–10:15) and/or early exit grace: reduce by 15 min once → weekday 7.75, Saturday 6.25.
+	Both flags on the same day still use a single 15-min reduction.
+	"""
+	rules = get_rules(attendance_date)
+	required = rules["full_day_hours"]
+	if late_entry or early_exit:
+		required = flt(required - GRACE_HOURS_REDUCTION)
+	return required
 
 
 def is_head_office_employee(employee):
@@ -108,17 +136,17 @@ def get_checkin_logs(employee, attendance_date):
 
 
 def get_early_exit_bounds(attendance_date):
-	"""Return (earliest allowed early out, last early-out minute, mandatory out)."""
+	"""Return (earliest allowed early out, last early-out minute, mandatory out) as minute values."""
 	if is_saturday(attendance_date):
 		return (
-			get_time(SATURDAY_EARLY_EXIT_BEFORE),
-			get_time(SATURDAY_EARLY_EXIT_UNTIL),
-			get_time(SATURDAY_FULL_DAY_OUT),
+			_bound_minute(SATURDAY_EARLY_EXIT_BEFORE),
+			_bound_minute(SATURDAY_EARLY_EXIT_UNTIL),
+			_bound_minute(SATURDAY_FULL_DAY_OUT),
 		)
 	return (
-		get_time(WEEKDAY_EARLY_EXIT_BEFORE),
-		get_time(WEEKDAY_EARLY_EXIT_UNTIL),
-		get_time(WEEKDAY_FULL_DAY_OUT),
+		_bound_minute(WEEKDAY_EARLY_EXIT_BEFORE),
+		_bound_minute(WEEKDAY_EARLY_EXIT_UNTIL),
+		_bound_minute(WEEKDAY_FULL_DAY_OUT),
 	)
 
 
@@ -127,32 +155,32 @@ def is_on_time_or_allowed_early_out(out_time, attendance_date):
 	if not out_time:
 		return False
 
-	out_t = get_time(out_time)
+	out_m = _policy_minute(out_time)
 	grace_from, grace_until, mandatory_out = get_early_exit_bounds(attendance_date)
-	if out_t >= mandatory_out:
+	if out_m >= mandatory_out:
 		return True
-	if grace_from <= out_t <= grace_until:
+	if grace_from <= out_m <= grace_until:
 		return True
-	if grace_until < out_t < mandatory_out:
+	if grace_until < out_m < mandatory_out:
 		return True
 	return False
 
 
 def is_beyond_allowed_late(in_time):
-	"""Punch-in more than 15 minutes after core start → not covered by monthly allowance."""
+	"""Punch-in after the 10:15 minute (from 10:16:00) → not covered by monthly allowance."""
 	if not in_time:
 		return False
-	return get_time(in_time) > get_time(LATE_ENTRY_AFTER)
+	return _policy_minute(in_time) > _bound_minute(LATE_ENTRY_AFTER)
 
 
 def is_beyond_allowed_early_exit(out_time, attendance_date):
-	"""Left more than 15 minutes before mandatory end → not covered by monthly allowance."""
+	"""Left before the allowed early-exit minute → not covered by monthly allowance."""
 	if not out_time:
 		return False
 
-	out_t = get_time(out_time)
+	out_m = _policy_minute(out_time)
 	grace_from, _, mandatory_out = get_early_exit_bounds(attendance_date)
-	return out_t < mandatory_out and out_t < grace_from
+	return out_m < mandatory_out and out_m < grace_from
 
 
 def calc_working_hours(logs):
@@ -186,19 +214,20 @@ def check_late_entry_early_exit(in_time, out_time, attendance_date):
 	Return (late_entry, early_exit) as 0/1 for allowed monthly occasions only.
 	- late_entry: in from 10:01 AM up to 10:15 AM (10:00:00–10:00:59 is on-time)
 	- early_exit: out from 6:15 PM up to 6:29 PM (6:30:00–6:30:59 is on-time)
+	Seconds are ignored — 10:15:59 counts as 10:15, 18:29:59 as 18:29.
 	"""
 	if not in_time or not out_time:
 		return 0, 0
 
-	in_t = get_time(in_time)
-	out_t = get_time(out_time)
+	in_m = _policy_minute(in_time)
+	out_m = _policy_minute(out_time)
 
-	late_from = get_time(LATE_ENTRY_FROM)
-	allowed_late_cutoff = get_time(LATE_ENTRY_AFTER)
-	late_entry = 1 if late_from <= in_t <= allowed_late_cutoff else 0
+	late_from = _bound_minute(LATE_ENTRY_FROM)
+	allowed_late_cutoff = _bound_minute(LATE_ENTRY_AFTER)
+	late_entry = 1 if late_from <= in_m <= allowed_late_cutoff else 0
 
 	grace_from, grace_until, _ = get_early_exit_bounds(attendance_date)
-	early_exit = 1 if grace_from <= out_t <= grace_until else 0
+	early_exit = 1 if grace_from <= out_m <= grace_until else 0
 
 	return late_entry, early_exit
 
@@ -240,9 +269,9 @@ def get_violation_reason(in_time, out_time, attendance_date):
 def meets_first_half_timing(attendance_date, in_time, out_time):
 	"""First half: on-time in by core cutoff and out by first-half end."""
 	rules = get_rules(attendance_date)
-	return get_time(in_time) <= get_time(rules["core_in_by"]) and get_time(out_time) >= get_time(
-		rules["first_half_out_by"]
-	)
+	return _policy_minute(in_time) <= _bound_minute(rules["core_in_by"]) and _policy_minute(
+		out_time
+	) >= _bound_minute(rules["first_half_out_by"])
 
 
 def is_second_half_in_on_time(in_time, attendance_date):
@@ -250,7 +279,7 @@ def is_second_half_in_on_time(in_time, attendance_date):
 	if not in_time:
 		return False
 	rules = get_rules(attendance_date)
-	return get_time(in_time) < get_time(rules["second_half_in_after"])
+	return _policy_minute(in_time) < _bound_minute(rules["second_half_in_after"])
 
 
 def meets_second_half_timing(attendance_date, in_time, out_time):
@@ -280,6 +309,7 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 
 	rules = get_rules(attendance_date)
 	late_entry, early_exit = check_late_entry_early_exit(in_dt, out_dt, attendance_date)
+	required_full_day_hours = get_required_full_day_hours(attendance_date, late_entry, early_exit)
 
 	final_status = "Absent"
 	final_half_day_status = ""
@@ -291,7 +321,7 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation)
 	if (
 		working_hours >= rules["min_half_day_hours"]
-		and working_hours < rules["full_day_hours"]
+		and working_hours < required_full_day_hours
 		and meets_first_half_timing(attendance_date, in_dt, out_dt)
 	):
 		return working_hours, "Half Day", "Present", late_entry, early_exit
@@ -301,7 +331,7 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 
 	# Full day Present: enough hours + on-time / allowed early out
 	if (
-		working_hours >= rules["full_day_hours"]
+		working_hours >= required_full_day_hours
 		and is_on_time_or_allowed_early_out(out_dt, attendance_date)
 	):
 		final_status = "Present"
