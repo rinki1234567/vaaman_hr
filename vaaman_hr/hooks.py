@@ -132,6 +132,7 @@ override_doctype_class = {
         "Attendance": "vaaman_hr.vaaman_hr.api.vaaman_hr" ,
         "Attendance Request": "vaaman_hr.overrides.attendance_request.CustomAttendanceRequest",
         "Compensatory Leave Request": "vaaman_hr.vaaman_hr.compoff.CompOff",
+        "Leave Policy Assignment": "vaaman_hr.overrides.leave_policy_assignment.CustomLeavePolicyAssignment",
         "Salary Slip": "vaaman_hr.overrides.salary_slip.CustomSalarySlip"
         } 
 
