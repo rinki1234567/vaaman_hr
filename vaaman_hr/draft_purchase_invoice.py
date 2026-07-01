@@ -9,6 +9,7 @@ from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
 
 
 def auto_create_purchase_invoice(doc, method):
+    frappe.msgprint(_("Auto-creating Draft Purchase Invoice in the background..."), alert=True  )
     """
     Triggered on 'on_submit' of Purchase Receipt.
     Validates item-master expense accounts, then queues PI creation after commit.
@@ -167,10 +168,14 @@ def create_pi_as_admin(
         po_number = (pr_doc.custom_purchase_order_number or "").strip()
         is_cp_po = po_number.startswith("PO/CP") or po_number.startswith("WO/CP")
         is_sr_or_gr = pr_doc.name.startswith("SR") or pr_doc.name.startswith("GR")
-        if is_sr_or_gr and is_cp_po:
+
+        if pr_doc.is_return and pr_doc.naming_series == "GRRET/.FY./.#####":    
+            pi_doc.naming_series = "PRET/.FY./.#####"
+        elif is_sr_or_gr and is_cp_po:
             pi_doc.naming_series = "PCP/.FY./.#####"
         else:
             pi_doc.naming_series = "PINV/.FY./.#####"
+
 
         pi_doc.insert()
 
