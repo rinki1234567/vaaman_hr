@@ -24,13 +24,16 @@
    "fieldname": "company",
    "fieldtype": "Link",
    "label": "Company",
-   "options": "Company"
+   "options": "Company",
+   "read_only": 1
   },
   {
+   "fetch_from": "employee.branch",
    "fieldname": "branch",
    "fieldtype": "Link",
    "label": "Branch",
-   "options": "Branch"
+   "options": "Branch",
+   "read_only": 1
   },
   {
    "fieldname": "weekly_off_day",
@@ -54,7 +57,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-08 10:39:37.499328",
+ "modified": "2026-07-10 16:46:29.835570",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Employee Weekly Off Master",

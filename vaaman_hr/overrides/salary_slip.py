@@ -401,42 +401,49 @@ class CustomSalarySlip(ERPNextSalarySlip):
                 "from_date": ["<=", end_date],
                 
             },
-            fields=["weekly_off_day", "to_date"],
-            order_by="from_date desc",
+            fields=["from_date", "to_date", "weekly_off_day"],
+            order_by="from_date asc",
         )
         
-        weekly_off_day = None
+        week_map = {
+            "Monday": 0,
+            "Tuesday": 1,
+            "Wednesday": 2,
+            "Thursday": 3,
+            "Friday": 4,
+            "Saturday": 5,
+            "Sunday": 6,	
+        }
+
+            
+        weekly_off_count = 0
         for row in weekly_off_records:
-            if not row.to_date or getdate(row.to_date) >= start_date:
-                weekly_off_day = row.weekly_off_day
-                break
-        if weekly_off_day:
-            week_map ={
-                "Monday": 0,
-                "Tuesday": 1,
-                "Wednesday": 2,
-                "Thursday": 3,
-                "Friday": 4,
-                "Saturday": 5,
-                "Sunday": 6,	
-            }
 
-            weekly_off_index = week_map.get(weekly_off_day)
-            weekly_off_count = 0
-            current_date = start_date
+            # Effective period start
+            effective_start = max(start_date, getdate(row.from_date))
 
-            while current_date <= end_date:
+            # Effective period end
+            if row.to_date:
+                effective_end = min(end_date, getdate(row.to_date))
+            else:
+                effective_end = end_date
+
+            # Skip invalid range
+            if effective_start > effective_end:
+                continue
+
+            weekly_off_index = week_map.get(row.weekly_off_day)
+
+            current_date = effective_start
+
+
+            while current_date <= effective_end:
                 if current_date.weekday() == weekly_off_index:
                     weekly_off_count += 1
                 current_date += timedelta(days=1)
-            
-            self.custom_employee_weekly_off_days = weekly_off_count
-        else:
-            self.custom_employee_weekly_off_days = 0
+
+        self.custom_employee_weekly_off_days = weekly_off_count
          
-    
-          
-        
         self.total_working_days = total_working_days
         self.absent_days = max(0, absent_days)
         self.unmarked_days = max(0, unmarked_days)
