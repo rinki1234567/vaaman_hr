@@ -9,6 +9,7 @@
   "employee",
   "company",
   "branch",
+  "column_break_wjs0",
   "weekly_off_day",
   "from_date",
   "to_date"
@@ -52,12 +53,16 @@
    "fieldname": "to_date",
    "fieldtype": "Date",
    "label": "To Date"
+  },
+  {
+   "fieldname": "column_break_wjs0",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-10 16:46:29.835570",
+ "modified": "2026-07-15 09:14:46.345034",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Employee Weekly Off Master",
