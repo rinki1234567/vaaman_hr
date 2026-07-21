@@ -37,6 +37,8 @@ def get_conditions(filters):
 		conditions.update({"status": filters.get("employee_status")})
 	if filters.get("branch"):
 		conditions.update({"branch": filters.get("branch")})
+	if filters.get("staff_worker"):
+		conditions.update({"custom_staffworker": filters.get("staff_worker")})
 	if filters.get("employee"):
 		conditions.update({"employee": filters.get("employee")})
 
