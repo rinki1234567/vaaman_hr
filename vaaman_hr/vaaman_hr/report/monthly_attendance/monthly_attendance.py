@@ -1354,6 +1354,28 @@ def get_effective_start_day(date_of_joining, filters: Filters) -> int:
         return joining.day
     return 1
 
+def get_effective_end_day(relieving_date, filters: Filters) -> int:
+    """Returns the last day (1-based) visible for an employee in the filter month.
+    Days after this are blanked because the employee had already been relieved."""
+    total_days = get_total_days_in_month(filters)
+    if not relieving_date:
+        return total_days
+
+    relieving = getdate(relieving_date)
+    filter_year = cint(filters.year)
+    filter_month = cint(filters.month)
+
+    # Relieved before this month — all days blank
+    if relieving.year < filter_year or (relieving.year == filter_year and relieving.month < filter_month):
+        return 0
+
+    # Relieved during this month — days after relieving day are blank
+    if relieving.year == filter_year and relieving.month == filter_month:
+        return relieving.day
+
+    # Relieved after this month — all days visible
+    return total_days
+
 def get_data(filters: Filters, attendance_map: dict) -> list[dict]:
     employee_details, group_by_param_values = get_employee_related_details(filters)
     holiday_map = get_holiday_map(filters)
@@ -1483,7 +1505,8 @@ def get_employee_related_details(filters: Filters) -> tuple[dict, list]:
             Employee.custom_staffworker,
             Employee.attendance_device_id,
             Employee.date_of_joining,
-            
+            Employee.relieving_date,
+
         )
         .where(Employee.company.isin(filters.companies))
     )
@@ -1591,7 +1614,7 @@ def get_rows(employee_details: dict, filters: Filters, holiday_map: dict, attend
                 continue
 
             attendance_for_employee = get_attendance_status_for_detailed_view(
-                employee, filters, employee_attendance, holidays, details.date_of_joining
+                employee, filters, employee_attendance, holidays, details.date_of_joining, details.relieving_date
             )
             # set employee details in the first row
             attendance_for_employee[0].update({"employee": employee, "employee_name": details.employee_name, "custom_staffworker": details.custom_staffworker, "attendance_device_id": details.attendance_device_id,})
@@ -1677,12 +1700,13 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None
-    
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None, relieving_date=None
+
 ) -> list[dict]:
-    
+
     total_days = get_total_days_in_month(filters)
     effective_start = get_effective_start_day(date_of_joining, filters)
+    effective_end = get_effective_end_day(relieving_date, filters)
     attendance_values = []
     
    
@@ -1723,7 +1747,7 @@ def get_attendance_status_for_detailed_view(
 
         
         for day in range(1, total_days + 1):
-            if day < effective_start:
+            if day < effective_start or day > effective_end:
                 row[cstr(day)] = ""
                 continue
             day_att = att_map.get(day)
