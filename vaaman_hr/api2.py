@@ -1077,76 +1077,99 @@ def get_shift_time_range(employee_id, date_str):
     
     return (start_dt, end_dt)
 
-@frappe.whitelist()
-def get_salary_slip_details(employee, month, year):
-    try:
-        start_date = get_first_day(f"{year}-{month}-01")
-        end_date = get_last_day(f"{year}-{month}-01")
-        salary_slip_name = frappe.db.get_value("Salary Slip", {
-            "employee": employee,
-            "start_date": start_date,
-            "end_date": end_date,
-            "docstatus": 1 
-        })
-
-        if not salary_slip_name:
-            frappe.throw(f"No submitted Salary Slip found for {employee} for the selected period.")
-
-        doc = frappe.get_doc("Salary Slip", salary_slip_name)
-        response_data = {
-            "name": doc.name,
-            "employee": doc.employee,
-            "employee_name": doc.employee_name,
-            "company": doc.company,
-            "branch": doc.branch,
-            "start_date": doc.start_date,
-            "end_date": doc.end_date,
-            "working_days": doc.total_working_days,
-            "leave_without_pay": doc.leave_without_pay,
-            "payment_days": doc.payment_days,
-            "gross_pay": doc.gross_pay,
-            "total_deduction": doc.total_deduction,
-            "net_pay": doc.net_pay,
-            "rounded_total": doc.rounded_total,
-            "total_in_words": doc.total_in_words,
-            "bank_name": doc.bank_name,
-            "bank_account_no": doc.bank_account_no,
-            "earnings": [
-                {"salary_component": d.salary_component, "amount": d.amount}
-                for d in doc.get("earnings", [])
-            ],
-            "deductions": [
-                {"salary_component": d.salary_component, "amount": d.amount}
-                for d in doc.get("deductions", [])
-            ],
-        }
-        
-        return response_data
-
-    except frappe.DoesNotExistError:
-        frappe.throw(f"Salary Slip {salary_slip_name} not found.")
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "API: get_salary_slip_details")
-        frappe.throw(f"An unexpected error occurred: {e}")
+@frappe.whitelist()                                                                                            
+    def get_salary_slip_details(employee, month, year):                                                            
+        try:                                                                                                       
+                                           
+            safe_month = str(month).zfill(2)                                                                       
+            start_date = get_first_day(f"{year}-{safe_month}-01")                                                  
+            end_date = get_last_day(f"{year}-{safe_month}-01")                                                     
+                                                                                                                                                   
+            slips = frappe.get_all(                                                                                
+                "Salary Slip",                                                                                     
+                filters=[                                                                                          
+                    ["employee", "=", employee],                                                                   
+                    ["docstatus", "=", 1],                                                                         
+                    ["start_date", "<=", end_date],                                                                
+                    ["end_date", ">=", start_date]                                                                 
+                ],                                                                                                 
+                pluck="name",                                                                                      
+                limit=1                                                                                            
+            )                                                                                                      
+                                                                                                                   
+            if not slips:                                                                                          
+                frappe.throw(f"No submitted Salary Slip found for {employee} for the selected period.")            
+                                                                                                                   
+            salary_slip_name = slips[0]                                                                            
+            doc = frappe.get_doc("Salary Slip", salary_slip_name)                                                  
+                                                                                                                   
+            response_data = {                                                                                      
+                "name": doc.name,                                                                                  
+                "employee": doc.employee,                                                                          
+                "employee_name": doc.employee_name,                                                                
+                "company": doc.company,                                                                            
+                "branch": doc.branch,                                                                              
+                "start_date": doc.start_date,                                                                      
+                "end_date": doc.end_date,                                                                          
+                "working_days": doc.total_working_days,                                                            
+                "leave_without_pay": doc.leave_without_pay,                                                        
+                "payment_days": doc.payment_days,                                                                  
+                "gross_pay": doc.gross_pay,                                                                        
+                "total_deduction": doc.total_deduction,                                                            
+                "net_pay": doc.net_pay,                                                                            
+                "rounded_total": doc.rounded_total,                                                                
+                "total_in_words": doc.total_in_words,                                                              
+                "bank_name": getattr(doc, "bank_name", ""),                                                        
+                "bank_account_no": getattr(doc, "bank_account_no", ""),                                            
+                "earnings": [                                                                                      
+                    {"salary_component": d.salary_component, "amount": d.amount}                                   
+                    for d in doc.get("earnings", [])                                                               
+                ],                                                                                                 
+                "deductions": [                                                                                    
+                    {"salary_component": d.salary_component, "amount": d.amount}                                   
+                    for d in doc.get("deductions", [])                                                             
+                ],                                                                                                 
+            }                                                                                                      
+                                                                                                                   
+            return response_data                                                                                   
+                                                                                                                   
+        except Exception as e:                                                                                     
+            frappe.log_error(frappe.get_traceback(), "API: get_salary_slip_details")                               
+            frappe.throw(f"An unexpected error occurred: {e}")   
 
 @frappe.whitelist()
 def download_salary_slip_pdf(docname):
     try:
         if not frappe.has_permission("Salary Slip", "read", docname):
-            frappe.throw("You do not have permission to access this document.", frappe.PermissionError)
-        pdf_content = frappe.get_print("Salary Slip", docname, as_pdf=True)
+            frappe.throw(
+                "You do not have permission to access this document.",
+                frappe.PermissionError,
+            )
+
+        pdf_content = frappe.get_print(
+            "Salary Slip",
+            docname,
+            print_format="Vaaman Salary Slip Head Office",
+            as_pdf=True,
+        )
+
         frappe.local.response.filename = f"{docname.replace('/', '_')}.pdf"
         frappe.local.response.filecontent = pdf_content
         frappe.local.response.type = "pdf"
 
     except frappe.PermissionError:
         frappe.response.http_status_code = 403
-        frappe.response['message'] = "Permission Denied"
-    
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "download_salary_slip_pdf Error")
+        frappe.response["message"] = "Permission Denied"
+
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "download_salary_slip_pdf Error",
+        )
         frappe.response.http_status_code = 500
-        frappe.response['message'] = "An error occurred while generating the PDF. Please contact support."
+        frappe.response["message"] = (
+            "An error occurred while generating the PDF. Please contact support."
+        )
 
 @frappe.whitelist(allow_guest=True)
 def get_filtered_historical_paths(date, department=None, branch=None, employee_id=None):
