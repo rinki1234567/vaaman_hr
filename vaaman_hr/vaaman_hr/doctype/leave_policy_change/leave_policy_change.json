@@ -182,8 +182,8 @@
    "reqd": 1
   },
   {
-   "default": "1",
-   "description": "Carry unused balance from closed allocations into the new policy (standard HRMS carry-forward)",
+   "default": "0",
+   "description": "Only carry unused leaves from the closed (rebalanced) period. Usually leave OFF for policy change so the new policy starts clean with its own prorata.",
    "fieldname": "carry_forward",
    "fieldtype": "Check",
    "label": "Carry Forward Unused Leaves"

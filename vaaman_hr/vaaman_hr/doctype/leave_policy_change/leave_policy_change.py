@@ -8,6 +8,13 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, add_months, cint, flt, formatdate, get_link_to_form, getdate
 
+from hrms.hr.doctype.leave_ledger_entry.leave_ledger_entry import create_leave_ledger_entry
+
+from vaaman_hr.overrides.leave_policy_assignment import (
+	PRORATED_LEAVE_TYPES,
+	calculate_monthly_prorated_leaves,
+)
+
 
 PROBATION_DEFAULT_MONTHS = 6
 
@@ -265,7 +272,12 @@ class LeavePolicyChange(Document):
 			)
 
 	def close_old_assignment(self):
-		"""Shorten old LPA + allocations + allocation ledgers to old_end_date (no cancel)."""
+		"""Shorten old LPA + allocations to old_end_date and rebalance CL/SL to period months.
+
+		Without rebalance, a full-year front-loaded allocation (e.g. 2.5 CL) shortened to
+		2 months would still carry ~2.5 into the new policy via carry-forward — double counting
+		against the new prorata. Rebalance reduces old credits to months actually covered.
+		"""
 		old_end = getdate(self.old_end_date)
 		snapshot = {
 			"lpa": {
@@ -274,10 +286,10 @@ class LeavePolicyChange(Document):
 			},
 			"allocations": [],
 			"ledgers": [],
+			"rebalance_ledgers": [],
 			"old_employment_type": self.old_employment_type,
 		}
 
-		# Snapshot + update allocations
 		allocations = frappe.get_all(
 			"Leave Allocation",
 			filters={
@@ -322,7 +334,6 @@ class LeavePolicyChange(Document):
 					).format(get_link_to_form("Leave Allocation", alloc.name))
 				)
 
-			# Shorten allocation ledgers first
 			ledgers = frappe.get_all(
 				"Leave Ledger Entry",
 				filters={
@@ -336,9 +347,7 @@ class LeavePolicyChange(Document):
 			for led in ledgers:
 				snapshot["ledgers"].append({"name": led.name, "to_date": str(getdate(led.to_date))})
 				if getdate(led.to_date) > old_end:
-					# Keep from_date <= to_date
-					new_to = old_end
-					if getdate(led.from_date) > new_to:
+					if getdate(led.from_date) > old_end:
 						frappe.throw(
 							_(
 								"Leave Ledger Entry {0} starts after old end date {1}. Cannot close safely."
@@ -348,7 +357,7 @@ class LeavePolicyChange(Document):
 						"Leave Ledger Entry",
 						led.name,
 						"to_date",
-						new_to,
+						old_end,
 						update_modified=False,
 					)
 
@@ -360,7 +369,10 @@ class LeavePolicyChange(Document):
 				update_modified=False,
 			)
 
-		# Shorten LPA
+			rebalance_name = self._rebalance_allocation_for_shortened_period(alloc, old_end)
+			if rebalance_name:
+				snapshot["rebalance_ledgers"].append(rebalance_name)
+
 		frappe.db.set_value(
 			"Leave Policy Assignment",
 			self.old_leave_policy_assignment,
@@ -370,6 +382,77 @@ class LeavePolicyChange(Document):
 		)
 
 		self.db_set("closure_snapshot", json.dumps(snapshot, default=str))
+
+	def _rebalance_allocation_for_shortened_period(self, alloc, old_end):
+		"""Reduce CL/SL credits to monthly prorata for [from_date, old_end]. Returns ledger name if created."""
+		if alloc.leave_type not in PRORATED_LEAVE_TYPES:
+			return None
+
+		annual = frappe.db.get_value(
+			"Leave Policy Detail",
+			{"parent": self.old_leave_policy, "leave_type": alloc.leave_type},
+			"annual_allocation",
+		)
+		if annual is None:
+			return None
+
+		target = flt(calculate_monthly_prorated_leaves(annual, alloc.from_date, old_end), 3)
+
+		current = flt(
+			frappe.db.sql(
+				"""
+				select coalesce(sum(leaves), 0)
+				from `tabLeave Ledger Entry`
+				where docstatus = 1
+					and transaction_type = 'Leave Allocation'
+					and transaction_name = %s
+					and is_expired = 0
+					and is_carry_forward = 0
+				""",
+				alloc.name,
+			)[0][0],
+			3,
+		)
+
+		delta = flt(target - current, 3)
+		if not delta:
+			return None
+
+		alloc_doc = frappe.get_doc("Leave Allocation", alloc.name)
+		args = {
+			"leaves": delta,
+			"from_date": old_end,
+			"to_date": old_end,
+			"is_carry_forward": 0,
+			"is_expired": 0,
+		}
+		create_leave_ledger_entry(alloc_doc, args, submit=True)
+
+		ledger_name = frappe.db.get_value(
+			"Leave Ledger Entry",
+			{
+				"transaction_type": "Leave Allocation",
+				"transaction_name": alloc.name,
+				"leaves": delta,
+				"from_date": old_end,
+				"to_date": old_end,
+				"is_expired": 0,
+				"docstatus": 1,
+			},
+			"name",
+			order_by="creation desc",
+		)
+
+		frappe.db.set_value(
+			"Leave Allocation",
+			alloc.name,
+			{
+				"total_leaves_allocated": flt(alloc_doc.total_leaves_allocated) + delta,
+				"new_leaves_allocated": max(flt(alloc_doc.new_leaves_allocated) + delta, 0),
+			},
+			update_modified=False,
+		)
+		return ledger_name
 
 	def create_new_assignment(self):
 		lpa = frappe.get_doc(
@@ -385,7 +468,6 @@ class LeavePolicyChange(Document):
 			}
 		)
 		lpa.flags.ignore_permissions = True
-		# Prevent set_dates from wiping custom dates when based_on is blank — already blank
 		lpa.insert()
 		lpa.submit()
 		self.db_set("new_leave_policy_assignment", lpa.name)
@@ -462,6 +544,11 @@ class LeavePolicyChange(Document):
 				pluck="name",
 			)
 			for name in expiry_entries:
+				frappe.db.delete("Leave Ledger Entry", {"name": name})
+
+		# Remove rebalance adjustment ledgers created on close
+		for name in snapshot.get("rebalance_ledgers", []):
+			if frappe.db.exists("Leave Ledger Entry", name):
 				frappe.db.delete("Leave Ledger Entry", {"name": name})
 
 		for led in snapshot.get("ledgers", []):
