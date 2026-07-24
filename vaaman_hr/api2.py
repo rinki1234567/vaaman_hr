@@ -55,12 +55,19 @@ def get_current_shift_summary(employee):
     if not shift:
         return {"status": "none"}
 
+    # return {
+    #     "status": "success",
+    #     "shift_name": shift.name,
+    #     # Format changed from "HH:mm:ss" to "hh:mm A" (e.g., 09:00 AM)
+    #     "start_time": format_time(shift.start_time, "hh:mm A") if shift.start_time else "--:--",
+    #     "end_time": format_time(shift.end_time, "hh:mm A") if shift.end_time else "--:--"
+    # }
     return {
         "status": "success",
         "shift_name": shift.name,
-        # Format changed from "HH:mm:ss" to "hh:mm A" (e.g., 09:00 AM)
-        "start_time": format_time(shift.start_time, "hh:mm A") if shift.start_time else "--:--",
-        "end_time": format_time(shift.end_time, "hh:mm A") if shift.end_time else "--:--"
+        # Send raw 24-hour time strings directly to the frontend
+        "start_time": str(shift.start_time) if shift.start_time else "--:--",
+        "end_time": str(shift.end_time) if shift.end_time else "--:--"
     }
 
 def get_local_now():
@@ -118,32 +125,32 @@ def get_shift_end_datetime(employee, checkin_time):
         shift_end_dt = add_days(shift_end_dt, 1)
         
     return shift_end_dt
-
 def determine_status(employee, last_checkin):
     """
     Decides status based strictly on the last valid log.
     NO STALE CHECKS HERE.
     """
-
     if not last_checkin or last_checkin.log_type == "OUT":
         return "OUT"
-
-    # shift_end_dt = get_shift_end_datetime(employee, last_checkin.time)
-    # current_time = get_local_now()
-
-    # if shift_end_dt and current_time < shift_end_dt:
-    #     return "IN"
 
     shift_end_dt = get_shift_end_datetime(employee, last_checkin.time)
     current_time = get_local_now()
 
     if shift_end_dt:
-        cushion_minutes = 60  
+        cushion_minutes = 60
         branch = frappe.db.get_value("Employee", employee, "branch")
         if branch:
-            settings_name = frappe.db.get_value("VaamanHR Settings", {"branch": branch}, "name")
+            settings_name = frappe.db.get_value(
+                "VaamanHR Settings",
+                {"branch": branch},
+                "name",
+            )
             if settings_name:
-                cushion_val = frappe.db.get_value("VaamanHR Settings", settings_name, "shift_end_cushion")
+                cushion_val = frappe.db.get_value(
+                    "VaamanHR Settings",
+                    settings_name,
+                    "shift_end_cushion",
+                )
                 if cushion_val is not None:
                     cushion_minutes = int(cushion_val)
 
@@ -151,22 +158,25 @@ def determine_status(employee, last_checkin):
 
         if current_time < cushioned_shift_end_dt:
             return "IN"
-            
+
+    # Search for an automated geofence log that happened AFTER the manual check-in
     last_geo_log = frappe.db.get_value(
-        "Employee Checkin", 
+        "Employee Checkin",
         {
             "employee": employee,
-            "time": (">", last_checkin.time), 
-            "custom_face_checkin_or_checkout": 0 
+            "time": (">", last_checkin.time),
+            "custom_geofence_in_or_out": 1,  # Strictly looking for geofence logs
         },
-        "log_type", 
-        order_by="time desc"
+        "log_type",
+        order_by="time desc",
     )
 
     if last_geo_log == "OUT":
         return "OUT"
 
     return "IN"
+
+
 
 @frappe.whitelist()
 def get_employee_checkin_status(employee):
@@ -175,52 +185,65 @@ def get_employee_checkin_status(employee):
         {
             "employee": employee,
             "docstatus": 0,
-            "custom_face_checkin_or_checkout": 1 
+            "custom_geofence_in_or_out": 0,  # Gets ANY manual check-in (Face OR Click & Go)
         },
         ["log_type", "time", "custom_outdoor_duty"],
-        order_by="time desc", 
-        as_dict=True
+        order_by="time desc",
+        as_dict=True,
     )
 
     real_status = determine_status(employee, last_checkin)
-    
+
     outdoor_flag = False
     if last_checkin and last_checkin.get("custom_outdoor_duty"):
         outdoor_flag = True
-
 
     current_date = get_local_now().date()
     has_checked_in_today = frappe.db.exists(
         "Employee Checkin",
         {
             "employee": employee,
-            "custom_face_checkin_or_checkout": 1,
+            "custom_geofence_in_or_out": 0,
             "time": (">=", current_date),
-            "docstatus": 0
-        }
+            "docstatus": 0,
+        },
     )
 
     return {
         "status": real_status,
         "outdoor": outdoor_flag,
-        "has_checked_in_today": bool(has_checked_in_today)
+        "has_checked_in_today": bool(has_checked_in_today),
     }
-
 @frappe.whitelist()
-def mark_attendance(employee, log_type, latitude, longitude, custom_outdoor_duty):
-    if not all([employee, log_type, latitude, longitude]):
-        frappe.throw("Employee, Log Type, Latitude, and Longitude are required.")
+def mark_attendance(
+    employee,
+    log_type,
+    latitude=None,
+    longitude=None,
+    custom_outdoor_duty=0,
+    is_click_and_go=0,
+):
+    # Strictly require all required fields
+    if not employee or not log_type or latitude is None or longitude is None:
+        frappe.throw("Employee, Log Type, Latitude, and Longitude are all strictly required.")
+
+    # Validate and convert coordinates
+    try:
+        lat_val = float(latitude)
+        lon_val = float(longitude)
+    except (ValueError, TypeError):
+        frappe.throw("Invalid GPS coordinates provided.")
 
     last_checkin = frappe.db.get_value(
         "Employee Checkin",
         {
             "employee": employee,
-            "custom_face_checkin_or_checkout": 1,
-            "docstatus": 0
+            "custom_geofence_in_or_out": 0,  # Fetch last manual check-in
+            "docstatus": 0,
         },
-        ["log_type", "time"], 
+        ["log_type", "time"],
         order_by="time desc",
-        as_dict=True 
+        as_dict=True,
     )
 
     current_status = determine_status(employee, last_checkin)
@@ -235,13 +258,25 @@ def mark_attendance(employee, log_type, latitude, longitude, custom_outdoor_duty
     checkin.employee = employee
     checkin.log_type = log_type
     checkin.time = get_local_now()
-    checkin.latitude = latitude
-    checkin.longitude = longitude
-    checkin.custom_face_checkin_or_checkout = 1
+    checkin.latitude = lat_val
+    checkin.longitude = lon_val
+
+    # 🚨 Crucial Fix: Only 1 if Face Punch!
+    checkin.custom_face_checkin_or_checkout = 0 if int(is_click_and_go) else 1
+
+    checkin.custom_geofence_in_or_out = 0
     checkin.custom_outdoor_duty = custom_outdoor_duty
+
     checkin.insert()
 
-    return {"status": "success", "message": f"Successfully {log_type}."}
+    return {
+        "status": "success",
+        "message": f"Successfully {log_type}.",
+    }
+
+
+
+
 
 @frappe.whitelist()
 def get_vaamanhr_settings():
@@ -251,59 +286,97 @@ def get_vaamanhr_settings():
     response = {
         "shift_end_cushion": DEFAULT_CUSHION,
         "app_version": DEFAULT_APP_VERSION,
-        "branch_features": [],   
+        "attendance_by": None,  # Branch-level setting
+        "branch_features": [],
         "employee_helper": {},
-        "employee_features": []  
+        "employee_features": [],
     }
-    
-    original_user = frappe.session.user
-    frappe.set_user("Administrator")
+
+    current_user = frappe.session.user
+    if current_user == "Guest":
+        return response
+
+    original_ignore = frappe.flags.ignore_permissions
+    frappe.flags.ignore_permissions = True
 
     try:
-        if original_user == "Guest":
-            return response
+        employee_id = frappe.db.get_value(
+            "Employee", {"user_id": current_user}, "name"
+        )
 
-        employee_id = frappe.db.get_value("Employee", {"user_id": original_user}, "name")
-        
         if not employee_id:
             return response
 
         branch = frappe.db.get_value("Employee", employee_id, "branch")
-        
-        if branch:
-            settings_name = frappe.db.get_value("VaamanHR Settings", {"branch": branch}, "name")
-            
-            if settings_name:
-                settings_doc = frappe.get_doc("VaamanHR Settings", settings_name)
-                
-                response["shift_end_cushion"] = int(settings_doc.shift_end_cushion) if settings_doc.shift_end_cushion is not None else DEFAULT_CUSHION
-                response["app_version"] = settings_doc.app_version if settings_doc.app_version else DEFAULT_APP_VERSION
-                
-                if hasattr(settings_doc, "given_features"):
-                    response["branch_features"] = [row.feature for row in settings_doc.given_features if row.feature]
 
-        helper_name = frappe.db.get_value("Employee Helper", {"employee": employee_id}, "name")
-        
+        if branch:
+            settings_name = frappe.db.get_value(
+                "VaamanHR Settings",
+                {"branch": branch},
+                "name",
+            )
+
+            if settings_name:
+                settings_doc = frappe.get_doc(
+                    "VaamanHR Settings", settings_name
+                )
+
+                response["shift_end_cushion"] = (
+                    int(settings_doc.shift_end_cushion)
+                    if settings_doc.shift_end_cushion is not None
+                    else DEFAULT_CUSHION
+                )
+
+                response["app_version"] = (
+                    settings_doc.app_version
+                    if settings_doc.app_version
+                    else DEFAULT_APP_VERSION
+                )
+
+                # Branch-level attendance_by
+                response["attendance_by"] = settings_doc.attendance_by
+
+                if hasattr(settings_doc, "given_features"):
+                    response["branch_features"] = [
+                        row.feature
+                        for row in settings_doc.given_features
+                        if row.feature
+                    ]
+
+        helper_name = frappe.db.get_value(
+            "Employee Helper",
+            {"employee": employee_id},
+            "name",
+        )
+
         if helper_name:
             helper_doc = frappe.get_doc("Employee Helper", helper_name)
-            
+
             response["employee_helper"] = {
                 "name": helper_doc.name,
                 "fcm_token": helper_doc.fcm_token,
                 "face_embeddings": helper_doc.face_embeddings,
-                "permission_banner_shown": helper_doc.permission_banner_shown
+                "permission_banner_shown": helper_doc.permission_banner_shown,
+                # Employee-level attendance_by
+                "attendance_by": helper_doc.attendance_by,
             }
 
             if hasattr(helper_doc, "given_features"):
-                response["employee_features"] = [row.feature for row in helper_doc.given_features if row.feature]
+                response["employee_features"] = [
+                    row.feature
+                    for row in helper_doc.given_features
+                    if row.feature
+                ]
 
     except Exception as e:
         frappe.log_error(f"VaamanHR API Error: {e}")
-    
+
     finally:
-        frappe.set_user(original_user)
+        frappe.flags.ignore_permissions = original_ignore
 
     return response
+
+
 
 
 @frappe.whitelist()
@@ -582,7 +655,7 @@ def update_approval_status(doctype, docname, action, rejection_reason=None):
         frappe.flags.ignore_permissions = False
 
 @frappe.whitelist()
-def log_geofence_event(employee, log_type, latitude, longitude, timestamp): 
+def log_geofence_event(employee, log_type, latitude, longitude, timestamp,permission_revoked=0): 
     if not all([employee, log_type, latitude, longitude, timestamp]): 
         frappe.throw("Employee, Log Type, Latitude, Longitude, and Timestamp are required.")
     
@@ -613,6 +686,9 @@ def log_geofence_event(employee, log_type, latitude, longitude, timestamp):
         checkin.latitude = latitude
         checkin.longitude = longitude
         checkin.custom_face_checkin_or_checkout = 0  
+        checkin.custom_geofence_in_or_out = 1
+
+        checkin.custom_permission_revoked = int(permission_revoked)
         checkin.insert(ignore_permissions=True)
 
         frappe.db.commit()
@@ -621,7 +697,6 @@ def log_geofence_event(employee, log_type, latitude, longitude, timestamp):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Geofence Event Logging Failed")
         frappe.throw(f"An error occurred while logging geofence event: {str(e)}")
-
 @frappe.whitelist()
 def log_geofence_event_batch(employee, events):
     if not employee or not events:
@@ -634,42 +709,40 @@ def log_geofence_event_batch(employee, events):
     except (json.JSONDecodeError, ValueError):
         frappe.throw("Events data is not a valid list.")
 
-    kolkata_tz = pytz.timezone('Asia/Kolkata')
+    kolkata_tz = pytz.timezone("Asia/Kolkata")
     logged_count = 0
-    skipped_count = 0 
-
-    # last_known_log_type = frappe.db.get_value(
-    #     "Employee Checkin",
-    #     {"employee": employee},
-    #     "log_type", 
-    #     order_by="time desc"
-    # )
+    skipped_count = 0
 
     for event in events_list:
         try:
             event_log_type = event.get("log_type")
-            
-            # if last_known_log_type and last_known_log_type == event_log_type:
-            #     skipped_count += 1
-            #     continue
 
             timestamp_val = event.get("timestamp")
             if not timestamp_val:
-                frappe.log_error(f"Skipping geofence event due to missing timestamp: {event}", "Geofence Batch Log")
+                frappe.log_error(
+                    f"Skipping geofence event due to missing timestamp: {event}",
+                    "Geofence Batch Log"
+                )
                 continue
-            
+
             utc_time = None
-            if isinstance(timestamp_val, (int, float)) or (isinstance(timestamp_val, str) and timestamp_val.isdigit()):
+            if isinstance(timestamp_val, (int, float)) or (
+                isinstance(timestamp_val, str) and timestamp_val.isdigit()
+            ):
                 timestamp_in_seconds = float(timestamp_val) / 1000.0
-                utc_time_naive = datetime.fromtimestamp(timestamp_in_seconds, tz=timezone.utc)
-                utc_time = utc_time_naive 
+                utc_time = datetime.fromtimestamp(
+                    timestamp_in_seconds, tz=timezone.utc
+                )
             elif isinstance(timestamp_val, str):
                 utc_time = get_datetime(timestamp_val)
 
             if not utc_time:
-                frappe.log_error(f"Could not parse timestamp for geofence event: {event}", "Geofence Batch Log")
+                frappe.log_error(
+                    f"Could not parse timestamp for geofence event: {event}",
+                    "Geofence Batch Log"
+                )
                 continue
-            
+
             ist_time = utc_time.astimezone(kolkata_tz)
             event_time = ist_time.replace(tzinfo=None)
 
@@ -680,17 +753,27 @@ def log_geofence_event_batch(employee, events):
             checkin.latitude = flt(event.get("latitude"))
             checkin.longitude = flt(event.get("longitude"))
             checkin.custom_face_checkin_or_checkout = 0
+            checkin.custom_geofence_in_or_out = 1
+
+            # Read and save permission_revoked from batch queue payload
+            checkin.custom_permission_revoked = int(
+                event.get("permission_revoked", 0)
+            )
+
             checkin.insert(ignore_permissions=True)
             logged_count += 1
 
-            # last_known_log_type = event_log_type
+        except Exception:
+            skipped_count += 1
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"Failed to process one event in geofence batch: {event}"
+            )
 
-        except Exception as e:
-            frappe.log_error(f"Failed to process one event in geofence batch: {event}. Error: {e}", "Geofence Batch Error")
-    
-    frappe.db.commit()
-    return {"status": "success", "message": f"Successfully logged {logged_count} and skipped {skipped_count} geofence events."}
-
+    return {
+        "logged": logged_count,
+        "skipped": skipped_count,
+    }
 @frappe.whitelist()
 def create_employee_with_user(first_name, last_name, email, company, date_of_joining, gender, date_of_birth, create_user):
     should_create_user = frappe.utils.cint(create_user) == 1
@@ -832,7 +915,6 @@ def calculate_daily_worked_hours(logs):
             in_time = None 
             
     return flt(total_seconds / 3600, 2)
-
 @frappe.whitelist()
 def get_employee_attendance_data(employee_id, year, month):
     try:
@@ -843,33 +925,42 @@ def get_employee_attendance_data(employee_id, year, month):
     except (ValueError, TypeError):
         frappe.throw("Year and month must be valid integers.")
 
-    # UPDATED: Added docstatus: 1 to filter out draft (Saved) records
     attendance_records = frappe.get_all(
         "Attendance",
         filters={
-            "employee": employee_id, 
+            "employee": employee_id,
             "attendance_date": ["between", (start_date, end_date)],
-            "docstatus": 1  
+            "docstatus": 1,
         },
-        fields=["attendance_date", "status"]
+        fields=["attendance_date", "status"],
     )
-    
+
     attendance_status_map = {
-        d.attendance_date.strftime("%Y-%m-%d"): d.status for d in attendance_records
+        d.attendance_date.strftime("%Y-%m-%d"): d.status
+        for d in attendance_records
     }
-    
-    holiday_name_map = {} 
+
+    holiday_name_map = {}
     weekly_off_dates = set()
-    holiday_list_name = frappe.db.get_value("Employee", employee_id, "holiday_list")
+
+    holiday_list_name = frappe.db.get_value(
+        "Employee", employee_id, "holiday_list"
+    )
+
     if holiday_list_name:
         holidays_with_details = frappe.get_all(
             "Holiday",
-            filters={"parent": holiday_list_name, "holiday_date": ["between", (start_date, end_date)]},
-            fields=["holiday_date", "weekly_off", "description"] 
+            filters={
+                "parent": holiday_list_name,
+                "holiday_date": ["between", (start_date, end_date)],
+            },
+            fields=["holiday_date", "weekly_off", "description"],
         )
+
         for h in holidays_with_details:
             holiday_date_obj = getdate(h.holiday_date)
             date_str = holiday_date_obj.strftime("%Y-%m-%d")
+
             if h.weekly_off:
                 weekly_off_dates.add(holiday_date_obj)
             else:
@@ -877,23 +968,49 @@ def get_employee_attendance_data(employee_id, year, month):
 
     checkins = frappe.get_all(
         "Employee Checkin",
-        filters={"employee": employee_id, "time": ["between", (start_date, end_date)]},
-        fields=["time", "log_type", "custom_face_checkin_or_checkout"],
-        order_by="time asc"
+        filters={
+            "employee": employee_id,
+            "time": ["between", (start_date, end_date)],
+        },
+        fields=[
+            "time",
+            "log_type",
+            "custom_face_checkin_or_checkout",
+            "custom_geofence_in_or_out",
+            "custom_permission_revoked",
+            "custom_outdoor_duty"
+        ],
+        order_by="time asc",
     )
+
     daily_logs = {}
+
     for checkin in checkins:
         checkin_date = getdate(checkin.time)
         date_str = checkin_date.strftime("%Y-%m-%d")
+
         if date_str not in daily_logs:
             daily_logs[date_str] = []
-        daily_logs[date_str].append({
-            "time": checkin.time.strftime("%I:%M %p"), "event": checkin.log_type,
-            "is_face_match": checkin.get("custom_face_checkin_or_checkout")
-        })
+
+        daily_logs[date_str].append(
+            {
+                "time": checkin.time.strftime("%I:%M %p"),
+                "event": checkin.log_type,
+                "is_face_match": checkin.get("custom_face_checkin_or_checkout"),
+                "is_geofence": checkin.get("custom_geofence_in_or_out"),
+                "permission_revoked": checkin.get("custom_permission_revoked"),
+                "is_outdoor_duty": checkin.get("custom_outdoor_duty"),
+            }
+        )
 
     processed_data = {}
-    present_days, absent_days, holiday_days, on_leave_days, weekly_off_days, half_days = 0, 0, 0, 0, 0, 0
+
+    present_days = 0
+    absent_days = 0
+    holiday_days = 0
+    on_leave_days = 0
+    weekly_off_days = 0
+    half_days = 0
 
     for day in range(1, days_in_month + 1):
         current_date = datetime(year, month, day).date()
@@ -902,6 +1019,7 @@ def get_employee_attendance_data(employee_id, year, month):
 
         if date_str in attendance_status_map:
             official_status = attendance_status_map[date_str]
+
             if official_status in ["Present", "Work From Home"]:
                 status = "Present"
             elif official_status == "Half Day":
@@ -910,8 +1028,10 @@ def get_employee_attendance_data(employee_id, year, month):
                 status = "On Leave"
             elif official_status == "Absent":
                 status = "Absent"
+
         elif current_date in weekly_off_dates:
             status = "Weekly Off"
+
         elif date_str in holiday_name_map:
             status = "Holiday"
 
@@ -919,12 +1039,17 @@ def get_employee_attendance_data(employee_id, year, month):
             if status == "Holiday":
                 processed_data[date_str] = {
                     "status": status,
-                    "holiday_name": holiday_name_map.get(date_str, "Public Holiday"),
-                    "logs": []
+                    "holiday_name": holiday_name_map.get(
+                        date_str, "Public Holiday"
+                    ),
+                    "logs": [],
                 }
                 holiday_days += 1
             else:
-                processed_data[date_str] = {"status": status, "logs": []}
+                processed_data[date_str] = {
+                    "status": status,
+                    "logs": [],
+                }
 
             if status == "Present":
                 present_days += 1
@@ -936,24 +1061,36 @@ def get_employee_attendance_data(employee_id, year, month):
                 on_leave_days += 1
             elif status == "Weekly Off":
                 weekly_off_days += 1
-    
+
     for date_str in daily_logs:
         if date_str not in processed_data:
             processed_data[date_str] = {
-                "status": None, 
-                "logs": []
+                "status": None,
+                "logs": [],
             }
-
 
     for date_str, data in processed_data.items():
         if date_str in daily_logs:
             logs = daily_logs.get(date_str, [])
-            first_checkin = next((log for log in logs if log['event'] == 'IN'), None)
-            last_checkout = next((log for log in reversed(logs) if log['event'] == 'OUT'), None)
+
+            first_checkin = next(
+                (log for log in logs if log["event"] == "IN"),
+                None,
+            )
+
+            last_checkout = next(
+                (log for log in reversed(logs) if log["event"] == "OUT"),
+                None,
+            )
+
             worked_hours = calculate_daily_worked_hours(logs)
 
-            data["check_in"] = first_checkin['time'] if first_checkin else None
-            data["check_out"] = last_checkout['time'] if last_checkout else None
+            data["check_in"] = (
+                first_checkin["time"] if first_checkin else None
+            )
+            data["check_out"] = (
+                last_checkout["time"] if last_checkout else None
+            )
             data["worked_hours"] = worked_hours
             data["logs"] = logs
 
@@ -965,11 +1102,9 @@ def get_employee_attendance_data(employee_id, year, month):
             "absent_days": absent_days,
             "holidays": holiday_days,
             "on_leave_days": on_leave_days,
-            "weekly_off_days": weekly_off_days
-        }
+            "weekly_off_days": weekly_off_days,
+        },
     }
-
-
 @frappe.whitelist()
 def log_employee_location_batch(employee, locations, branch_unit=None):
     if not employee or not locations:
