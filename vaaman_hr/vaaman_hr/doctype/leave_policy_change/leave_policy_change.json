@@ -1,0 +1,290 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-07-24 17:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "branch",
+  "column_break_main",
+  "change_date",
+  "old_employment_type",
+  "new_employment_type",
+  "staff_worker",
+  "update_employee_employment_type",
+  "old_policy_section",
+  "old_leave_policy_assignment",
+  "old_leave_policy",
+  "old_effective_from",
+  "column_break_old",
+  "old_effective_to",
+  "old_end_date",
+  "new_policy_section",
+  "new_leave_policy",
+  "carry_forward",
+  "column_break_new",
+  "new_effective_from",
+  "new_effective_to",
+  "new_leave_policy_assignment",
+  "reason_section",
+  "reason",
+  "closure_snapshot",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "HR-LPC-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "HR-LPC-.YYYY.-",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.branch",
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "description": "New policy starts on this date. Old policy ends the day before. Approved leaves on/after this date are kept and count against the new policy.",
+   "fieldname": "change_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Change Date",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employment_type",
+   "fieldname": "old_employment_type",
+   "fieldtype": "Link",
+   "label": "Current Employment Type",
+   "options": "Employment Type",
+   "read_only": 1
+  },
+  {
+   "description": "Can be the same as current (e.g. extend Probation). Used to look up Master Leave Policy Assignment.",
+   "fieldname": "new_employment_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "New Employment Type",
+   "options": "Employment Type",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.custom_staffworker",
+   "fieldname": "staff_worker",
+   "fieldtype": "Select",
+   "label": "Staff / Worker",
+   "options": "\nStaff\nWorker",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "On submit, set Employee Employment Type to the new value (skipped automatically if same as current)",
+   "fieldname": "update_employee_employment_type",
+   "fieldtype": "Check",
+   "label": "Update Employee Employment Type"
+  },
+  {
+   "fieldname": "old_policy_section",
+   "fieldtype": "Section Break",
+   "label": "Current Leave Policy (will be closed)"
+  },
+  {
+   "fieldname": "old_leave_policy_assignment",
+   "fieldtype": "Link",
+   "label": "Old Leave Policy Assignment",
+   "options": "Leave Policy Assignment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "old_leave_policy",
+   "fieldtype": "Link",
+   "label": "Old Leave Policy",
+   "options": "Leave Policy",
+   "read_only": 1
+  },
+  {
+   "fieldname": "old_effective_from",
+   "fieldtype": "Date",
+   "label": "Old Effective From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_old",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "old_effective_to",
+   "fieldtype": "Date",
+   "label": "Old Effective To (current)",
+   "read_only": 1
+  },
+  {
+   "description": "Old assignment / allocations will end on this date",
+   "fieldname": "old_end_date",
+   "fieldtype": "Date",
+   "label": "Old End Date (after change)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_policy_section",
+   "fieldtype": "Section Break",
+   "label": "New Leave Policy"
+  },
+  {
+   "description": "Auto-filled from Master Leave Policy Assignment; you can override",
+   "fieldname": "new_leave_policy",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "New Leave Policy",
+   "options": "Leave Policy",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Carry unused balance from closed allocations into the new policy (standard HRMS carry-forward)",
+   "fieldname": "carry_forward",
+   "fieldtype": "Check",
+   "label": "Carry Forward Unused Leaves"
+  },
+  {
+   "fieldname": "column_break_new",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "new_effective_from",
+   "fieldtype": "Date",
+   "label": "New Effective From",
+   "read_only": 1
+  },
+  {
+   "description": "Defaults to 6 months for Probation, otherwise Leave Period end. Editable.",
+   "fieldname": "new_effective_to",
+   "fieldtype": "Date",
+   "reqd": 1,
+   "label": "New Effective To"
+  },
+  {
+   "fieldname": "new_leave_policy_assignment",
+   "fieldtype": "Link",
+   "label": "New Leave Policy Assignment",
+   "no_copy": 1,
+   "options": "Leave Policy Assignment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "closure_snapshot",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Closure Snapshot",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Leave Policy Change",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-07-24 17:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Vaaman Hr",
+ "name": "Leave Policy Change",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}
