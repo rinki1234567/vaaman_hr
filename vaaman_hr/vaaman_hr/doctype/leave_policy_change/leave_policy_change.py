@@ -398,6 +398,34 @@ class LeavePolicyChange(Document):
 
 		return info
 
+	def _cancel_allocation_doc(self, alloc_name):
+		"""Cancel one Leave Allocation (+ its ledgers). Returns snapshot info."""
+		alloc = frappe.get_doc("Leave Allocation", alloc_name)
+		info = {
+			"name": alloc.name,
+			"leave_type": alloc.leave_type,
+			"from_date": str(getdate(alloc.from_date)),
+			"to_date": str(getdate(alloc.to_date)),
+			"total_leaves_allocated": flt(alloc.total_leaves_allocated),
+			"new_leaves_allocated": flt(alloc.new_leaves_allocated),
+		}
+		alloc.flags.ignore_permissions = True
+		try:
+			alloc.cancel()
+		except Exception:
+			frappe.db.set_value("Leave Allocation", alloc_name, "docstatus", 2, update_modified=False)
+			frappe.db.sql(
+				"""
+				update `tabLeave Ledger Entry`
+				set docstatus = 2
+				where transaction_type = 'Leave Allocation'
+					and transaction_name = %s
+					and docstatus = 1
+				""",
+				alloc_name,
+			)
+		return info
+
 	def restore_overridden_assignments(self):
 		"""Best-effort recreate LPAs that were overridden (allocations re-granted on submit)."""
 		if not self.closure_snapshot:
@@ -534,13 +562,12 @@ class LeavePolicyChange(Document):
 			if getdate(alloc.to_date) <= old_end:
 				continue
 
+			# Allocation that starts entirely after old_end (future period under same LPA)
+			# — cancel it instead of blocking the policy change.
 			if getdate(alloc.from_date) > old_end:
-				frappe.throw(
-					_(
-						"Leave Allocation {0} starts after the old end date. "
-						"Resolve this allocation manually before submitting."
-					).format(get_link_to_form("Leave Allocation", alloc.name))
-				)
+				info = self._cancel_allocation_doc(alloc.name)
+				snapshot.setdefault("cancelled_future_allocations", []).append(info)
+				continue
 
 			ledgers = frappe.get_all(
 				"Leave Ledger Entry",
@@ -550,17 +577,34 @@ class LeavePolicyChange(Document):
 					"docstatus": 1,
 					"is_expired": 0,
 				},
-				fields=["name", "to_date", "from_date"],
+				fields=["name", "to_date", "from_date", "leaves"],
 			)
+			cancelled_future_leaves = 0.0
 			for led in ledgers:
+				# Monthly top-ups (e.g. PL from Mar/Apr) that start after old_end belong
+				# only to the cancelled future period — cancel them instead of blocking close.
+				if getdate(led.from_date) > old_end:
+					snapshot.setdefault("cancelled_future_ledgers", []).append(
+						{
+							"name": led.name,
+							"leaves": flt(led.leaves),
+							"from_date": str(getdate(led.from_date)),
+							"to_date": str(getdate(led.to_date)),
+							"allocation": alloc.name,
+						}
+					)
+					frappe.db.set_value(
+						"Leave Ledger Entry",
+						led.name,
+						"docstatus",
+						2,
+						update_modified=False,
+					)
+					cancelled_future_leaves += flt(led.leaves)
+					continue
+
 				snapshot["ledgers"].append({"name": led.name, "to_date": str(getdate(led.to_date))})
 				if getdate(led.to_date) > old_end:
-					if getdate(led.from_date) > old_end:
-						frappe.throw(
-							_(
-								"Leave Ledger Entry {0} starts after old end date {1}. Cannot close safely."
-							).format(led.name, formatdate(old_end))
-						)
 					frappe.db.set_value(
 						"Leave Ledger Entry",
 						led.name,
@@ -568,6 +612,28 @@ class LeavePolicyChange(Document):
 						old_end,
 						update_modified=False,
 					)
+
+			if cancelled_future_leaves:
+				frappe.db.set_value(
+					"Leave Allocation",
+					alloc.name,
+					{
+						"total_leaves_allocated": max(
+							flt(alloc.total_leaves_allocated) - cancelled_future_leaves, 0
+						),
+						"new_leaves_allocated": max(
+							flt(alloc.new_leaves_allocated) - cancelled_future_leaves, 0
+						),
+					},
+					update_modified=False,
+				)
+				# Keep in-memory values in sync for later rebalance/expire on this loop
+				alloc.total_leaves_allocated = max(
+					flt(alloc.total_leaves_allocated) - cancelled_future_leaves, 0
+				)
+				alloc.new_leaves_allocated = max(
+					flt(alloc.new_leaves_allocated) - cancelled_future_leaves, 0
+				)
 
 			# Cancel expiry ledgers dated after old_end (created when old LPA originally ended later).
 			# Otherwise Employee Leave Balance double-counts Expired and closing goes negative.
@@ -1047,6 +1113,48 @@ class LeavePolicyChange(Document):
 		for name in snapshot.get("rebalance_ledgers", []):
 			if frappe.db.exists("Leave Ledger Entry", name):
 				frappe.db.delete("Leave Ledger Entry", {"name": name})
+
+		# Re-open monthly top-up ledgers that were cancelled because they started after old_end
+		for led in snapshot.get("cancelled_future_ledgers", []):
+			if frappe.db.exists("Leave Ledger Entry", led["name"]):
+				frappe.db.set_value(
+					"Leave Ledger Entry",
+					led["name"],
+					"docstatus",
+					1,
+					update_modified=False,
+				)
+
+		for led in snapshot.get("cancelled_orphan_expiry", []):
+			if frappe.db.exists("Leave Ledger Entry", led["name"]):
+				frappe.db.set_value(
+					"Leave Ledger Entry",
+					led["name"],
+					"docstatus",
+					1,
+					update_modified=False,
+				)
+
+		# Re-open whole allocations that started after old_end and were cancelled on close
+		for info in snapshot.get("cancelled_future_allocations", []):
+			if frappe.db.exists("Leave Allocation", info["name"]):
+				frappe.db.set_value(
+					"Leave Allocation",
+					info["name"],
+					"docstatus",
+					1,
+					update_modified=False,
+				)
+				frappe.db.sql(
+					"""
+					update `tabLeave Ledger Entry`
+					set docstatus = 1
+					where transaction_type = 'Leave Allocation'
+						and transaction_name = %s
+						and docstatus = 2
+					""",
+					info["name"],
+				)
 
 		# Remove expiry ledgers created on close; restore CF flags
 		for info in snapshot.get("expiry_ledgers", []):
