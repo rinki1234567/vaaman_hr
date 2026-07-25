@@ -100,6 +100,40 @@ frappe.ui.form.on("Leave Policy Change", {
 						indicator: "orange",
 					});
 				}
+
+				if (d.replace_from_start) {
+					frappe.msgprint({
+						title: __("Same-day policy replace"),
+						message: __(
+							"Change Date is the same as old assignment start ({0}). "
+								+ "That assignment will be fully cancelled and replaced on the same day. "
+								+ "Keep <b>Override Existing Assignments</b> checked.",
+							[d.old_effective_from]
+						),
+						indicator: "orange",
+					});
+					if (!frm.doc.override_existing_assignments) {
+						frm.set_value("override_existing_assignments", 1);
+					}
+				} else if (d.overlapping_assignments && d.overlapping_assignments.length) {
+					const lines = d.overlapping_assignments
+						.map(
+							(o) =>
+								`${o.name} — ${o.leave_policy_title || o.leave_policy} (${o.effective_from} → ${o.effective_to})`
+						)
+						.join("<br>");
+					frappe.msgprint({
+						title: __("Existing assignments will be overridden"),
+						message: __(
+							"These overlap the new period. Keep <b>Override Existing Assignments</b> checked to replace them:<br><br>{0}",
+							[lines]
+						),
+						indicator: "orange",
+					});
+					if (!frm.doc.override_existing_assignments) {
+						frm.set_value("override_existing_assignments", 1);
+					}
+				}
 			},
 		});
 	},

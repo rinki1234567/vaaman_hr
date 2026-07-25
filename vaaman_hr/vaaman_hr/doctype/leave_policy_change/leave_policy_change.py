@@ -28,15 +28,30 @@ class LeavePolicyChange(Document):
 		self.validate_change()
 
 	def on_submit(self):
-		self.close_old_assignment()
+		if self.is_replace_from_start():
+			# Same-day (or from-start) change: cancel old LPA entirely — nothing to close.
+			self.replace_old_assignment_from_start()
+		else:
+			self.close_old_assignment()
+		if self.override_existing_assignments:
+			self.override_overlapping_assignments()
 		self.create_new_assignment()
+		if self.carry_forward and not self.is_replace_from_start():
+			self.carry_forward_unused_to_new()
 		self.update_employee_type()
 		self.add_audit_comments()
+
+	def is_replace_from_start(self):
+		"""True when Change Date is on/before old LPA start — cannot shorten, must replace."""
+		if not (self.old_effective_from and self.change_date):
+			return False
+		return getdate(self.old_effective_from) >= getdate(self.change_date)
 
 	def on_cancel(self):
 		self.validate_cancel_allowed()
 		self.cancel_new_assignment()
 		self.restore_old_assignment()
+		self.restore_overridden_assignments()
 		self.restore_employee_type()
 		self.add_audit_comments(reversed_entry=True)
 
@@ -143,14 +158,29 @@ class LeavePolicyChange(Document):
 			frappe.throw(_("New Effective To cannot be before New Effective From"))
 
 		if getdate(self.old_effective_from) > getdate(self.old_end_date):
-			frappe.throw(
-				_(
-					"Change Date {0} is on or before the old assignment start {1}. "
-					"Nothing to close — create a fresh Leave Policy Assignment instead."
-				).format(
-					frappe.bold(formatdate(self.change_date)),
-					frappe.bold(formatdate(self.old_effective_from)),
+			# Same-day / from-start: old LPA starts on Change Date — replace via override.
+			if not self.override_existing_assignments:
+				frappe.throw(
+					_(
+						"Change Date {0} is on or before the old assignment start {1}. "
+						"Enable <b>Override Existing Assignments</b> to replace that assignment "
+						"on the same day, or pick a later Change Date."
+					).format(
+						frappe.bold(formatdate(self.change_date)),
+						frappe.bold(formatdate(self.old_effective_from)),
+					)
 				)
+			frappe.msgprint(
+				_(
+					"Change Date equals old assignment start ({0}). "
+					"Old Leave Policy Assignment {1} will be <b>fully cancelled/replaced</b> "
+					"(not shortened) and a new assignment will start the same day."
+				).format(
+					formatdate(self.old_effective_from),
+					frappe.bold(self.old_leave_policy_assignment),
+				),
+				indicator="orange",
+				alert=True,
 			)
 
 		if getdate(self.old_effective_to) < getdate(self.change_date):
@@ -226,6 +256,184 @@ class LeavePolicyChange(Document):
 				indicator="orange",
 				alert=True,
 			)
+
+		overlapping = self.get_overlapping_assignments()
+		if overlapping:
+			names = ", ".join(
+				f"{r.name} ({frappe.db.get_value('Leave Policy', r.leave_policy, 'title') or r.leave_policy}: "
+				f"{formatdate(r.effective_from)} → {formatdate(r.effective_to)})"
+				for r in overlapping
+			)
+			if self.override_existing_assignments:
+				frappe.msgprint(
+					_(
+						"These Leave Policy Assignment(s) overlap the new period and will be "
+						"<b>cancelled/overridden</b> on submit: {0}"
+					).format(names),
+					indicator="orange",
+					alert=True,
+				)
+			else:
+				frappe.throw(
+					_(
+						"Cannot assign new policy — overlapping Leave Policy Assignment(s) exist: {0}. "
+						"Enable <b>Override Existing Assignments</b> to replace them."
+					).format(names)
+				)
+
+	def get_overlapping_assignments(self):
+		"""Other submitted LPAs that overlap [new_effective_from, new_effective_to]."""
+		if not (self.employee and self.new_effective_from and self.new_effective_to):
+			return []
+
+		return frappe.get_all(
+			"Leave Policy Assignment",
+			filters={
+				"employee": self.employee,
+				"docstatus": 1,
+				"name": ["not in", [self.old_leave_policy_assignment or "", self.name]],
+				"effective_from": ["<=", self.new_effective_to],
+				"effective_to": [">=", self.new_effective_from],
+			},
+			fields=["name", "leave_policy", "effective_from", "effective_to", "carry_forward"],
+			order_by="effective_from",
+		)
+
+	def replace_old_assignment_from_start(self):
+		"""Cancel old LPA that starts on Change Date (same-day policy switch)."""
+		if not self.old_leave_policy_assignment:
+			return
+
+		snapshot = json.loads(self.closure_snapshot or "{}")
+		snapshot["replace_from_start"] = 1
+		snapshot["lpa"] = {
+			"name": self.old_leave_policy_assignment,
+			"effective_to": str(getdate(self.old_effective_to)),
+			"effective_from": str(getdate(self.old_effective_from)),
+			"cancelled": 1,
+		}
+		info = self._cancel_lpa_with_allocations(self.old_leave_policy_assignment)
+		overridden = snapshot.get("overridden_assignments") or []
+		overridden.append(info)
+		snapshot["overridden_assignments"] = overridden
+		self.db_set("closure_snapshot", json.dumps(snapshot, default=str))
+		self.db_set(
+			"overridden_assignments",
+			", ".join(o["name"] for o in overridden),
+		)
+
+	def override_overlapping_assignments(self):
+		"""Cancel overlapping LPAs + their allocations so the new assignment can replace them."""
+		overlapping = self.get_overlapping_assignments()
+		if not overlapping:
+			return
+
+		snapshot = json.loads(self.closure_snapshot or "{}")
+		overridden = list(snapshot.get("overridden_assignments") or [])
+		already = {o.get("name") for o in overridden}
+
+		for lpa_row in overlapping:
+			if lpa_row.name in already:
+				continue
+			info = self._cancel_lpa_with_allocations(lpa_row.name)
+			overridden.append(info)
+
+		snapshot["overridden_assignments"] = overridden
+		self.db_set("closure_snapshot", json.dumps(snapshot, default=str))
+		self.db_set(
+			"overridden_assignments",
+			", ".join(o["name"] for o in overridden),
+		)
+
+	def _cancel_lpa_with_allocations(self, lpa_name):
+		"""Cancel one LPA + its allocations. Returns snapshot info dict."""
+		lpa = frappe.get_doc("Leave Policy Assignment", lpa_name)
+		alloc_names = frappe.get_all(
+			"Leave Allocation",
+			filters={"leave_policy_assignment": lpa.name, "docstatus": 1},
+			pluck="name",
+		)
+		info = {
+			"name": lpa.name,
+			"leave_policy": lpa.leave_policy,
+			"effective_from": str(getdate(lpa.effective_from)),
+			"effective_to": str(getdate(lpa.effective_to)),
+			"carry_forward": cint(lpa.carry_forward),
+			"allocations": alloc_names,
+		}
+
+		for alloc_name in alloc_names:
+			alloc = frappe.get_doc("Leave Allocation", alloc_name)
+			alloc.flags.ignore_permissions = True
+			try:
+				alloc.cancel()
+			except Exception:
+				frappe.db.set_value("Leave Allocation", alloc_name, "docstatus", 2, update_modified=False)
+				frappe.db.sql(
+					"""
+					update `tabLeave Ledger Entry`
+					set docstatus = 2
+					where transaction_type = 'Leave Allocation'
+						and transaction_name = %s
+						and docstatus = 1
+					""",
+					alloc_name,
+				)
+
+		try:
+			lpa.flags.ignore_permissions = True
+			lpa.cancel()
+		except Exception:
+			frappe.db.set_value("Leave Policy Assignment", lpa.name, "docstatus", 2, update_modified=False)
+
+		try:
+			frappe.get_doc("Leave Policy Assignment", lpa.name).add_comment(
+				"Info",
+				_("Cancelled/overridden by Leave Policy Change {0}").format(
+					get_link_to_form(self.doctype, self.name)
+				),
+			)
+		except Exception:
+			pass
+
+		return info
+
+	def restore_overridden_assignments(self):
+		"""Best-effort recreate LPAs that were overridden (allocations re-granted on submit)."""
+		if not self.closure_snapshot:
+			return
+		snapshot = json.loads(self.closure_snapshot)
+		for info in snapshot.get("overridden_assignments") or []:
+			if frappe.db.exists("Leave Policy Assignment", info["name"]):
+				# Already exists (cancelled) — amend/recreate via new doc
+				pass
+			lpa = frappe.get_doc(
+				{
+					"doctype": "Leave Policy Assignment",
+					"employee": self.employee,
+					"leave_policy": info["leave_policy"],
+					"assignment_based_on": "",
+					"leave_period": "",
+					"effective_from": info["effective_from"],
+					"effective_to": info["effective_to"],
+					"carry_forward": cint(info.get("carry_forward")),
+				}
+			)
+			lpa.flags.ignore_permissions = True
+			try:
+				lpa.insert()
+				lpa.submit()
+			except Exception as e:
+				frappe.log_error(
+					title=_("Leave Policy Change: could not restore overridden LPA"),
+					message=f"{info}\n{e}",
+				)
+				frappe.msgprint(
+					_(
+						"Could not auto-restore overridden assignment {0}. Please recreate manually."
+					).format(info.get("name")),
+					indicator="orange",
+				)
 
 	def validate_cancel_allowed(self):
 		"""Cancel only if nothing was consumed from the new assignment."""
@@ -361,6 +569,36 @@ class LeavePolicyChange(Document):
 						update_modified=False,
 					)
 
+			# Cancel expiry ledgers dated after old_end (created when old LPA originally ended later).
+			# Otherwise Employee Leave Balance double-counts Expired and closing goes negative.
+			orphan_expiry = frappe.get_all(
+				"Leave Ledger Entry",
+				filters={
+					"transaction_type": "Leave Allocation",
+					"transaction_name": alloc.name,
+					"docstatus": 1,
+					"is_expired": 1,
+					"from_date": [">", old_end],
+				},
+				fields=["name", "leaves", "from_date", "to_date"],
+			)
+			for led in orphan_expiry:
+				snapshot.setdefault("cancelled_orphan_expiry", []).append(
+					{
+						"name": led.name,
+						"leaves": flt(led.leaves),
+						"from_date": str(getdate(led.from_date)),
+						"to_date": str(getdate(led.to_date)),
+					}
+				)
+				frappe.db.set_value(
+					"Leave Ledger Entry",
+					led.name,
+					"docstatus",
+					2,
+					update_modified=False,
+				)
+
 			frappe.db.set_value(
 				"Leave Allocation",
 				alloc.name,
@@ -372,6 +610,12 @@ class LeavePolicyChange(Document):
 			rebalance_name = self._rebalance_allocation_for_shortened_period(alloc, old_end)
 			if rebalance_name:
 				snapshot["rebalance_ledgers"].append(rebalance_name)
+
+			# Without CF: expire leftovers now. With CF: expire+add on new after new LPA exists.
+			if not self.carry_forward:
+				expiry_info = self._expire_closed_allocation(alloc, old_end)
+				if expiry_info:
+					snapshot.setdefault("expiry_ledgers", []).append(expiry_info)
 
 		frappe.db.set_value(
 			"Leave Policy Assignment",
@@ -454,7 +698,93 @@ class LeavePolicyChange(Document):
 		)
 		return ledger_name
 
+	def _expire_closed_allocation(self, alloc, old_end):
+		"""Expire unused leaves on the shortened allocation (no carry to new policy).
+
+		Converts open CF credits to normal credits first so Employee Leave Balance
+		(year) reports that only sum non-CF allocation credits still balance:
+		allocated - expired - taken = closing.
+		"""
+		from hrms.hr.doctype.leave_ledger_entry.leave_ledger_entry import get_remaining_leaves
+
+		cf_cleared = []
+		for led_name in frappe.get_all(
+			"Leave Ledger Entry",
+			filters={
+				"transaction_type": "Leave Allocation",
+				"transaction_name": alloc.name,
+				"docstatus": 1,
+				"is_expired": 0,
+				"is_carry_forward": 1,
+			},
+			pluck="name",
+		):
+			frappe.db.set_value(
+				"Leave Ledger Entry",
+				led_name,
+				"is_carry_forward",
+				0,
+				update_modified=False,
+			)
+			cf_cleared.append(led_name)
+
+		alloc_doc = frappe.get_doc("Leave Allocation", alloc.name)
+		# Ensure to_date is old_end for remaining-leaves calc
+		alloc_doc.to_date = old_end
+		remaining = flt(get_remaining_leaves(alloc_doc))
+		if not remaining:
+			if cf_cleared:
+				return {"allocation": alloc.name, "cf_cleared": cf_cleared, "expiry_ledger": None}
+			return None
+
+		args = {
+			"leaves": -remaining,
+			"transaction_name": alloc.name,
+			"transaction_type": "Leave Allocation",
+			"from_date": old_end,
+			"to_date": old_end,
+			"is_carry_forward": 0,
+			"is_expired": 1,
+		}
+		create_leave_ledger_entry(alloc_doc, args, submit=True)
+
+		expiry_ledger = frappe.db.get_value(
+			"Leave Ledger Entry",
+			{
+				"transaction_type": "Leave Allocation",
+				"transaction_name": alloc.name,
+				"is_expired": 1,
+				"from_date": old_end,
+				"to_date": old_end,
+				"leaves": -remaining,
+				"docstatus": 1,
+			},
+			"name",
+			order_by="creation desc",
+		)
+
+		frappe.db.set_value(
+			"Leave Allocation",
+			alloc.name,
+			{
+				"expired": 1,
+				"new_leaves_allocated": 0,
+				"total_leaves_allocated": 0,
+				"unused_leaves": 0,
+			},
+			update_modified=False,
+		)
+
+		return {
+			"allocation": alloc.name,
+			"cf_cleared": cf_cleared,
+			"expiry_ledger": expiry_ledger,
+			"expired_leaves": remaining,
+		}
+
 	def create_new_assignment(self):
+		# Always create without HRMS carry-forward. We add unused ourselves after rebalance
+		# so CL (often non-CF leave type) also carries, and amounts are period-correct.
 		lpa = frappe.get_doc(
 			{
 				"doctype": "Leave Policy Assignment",
@@ -464,13 +794,176 @@ class LeavePolicyChange(Document):
 				"leave_period": "",
 				"effective_from": self.new_effective_from,
 				"effective_to": self.new_effective_to,
-				"carry_forward": 1 if self.carry_forward else 0,
+				"carry_forward": 0,
 			}
 		)
 		lpa.flags.ignore_permissions = True
 		lpa.insert()
 		lpa.submit()
 		self.db_set("new_leave_policy_assignment", lpa.name)
+
+	def carry_forward_unused_to_new(self):
+		"""Expire unused on each old allocation and credit the same amount on the new allocation."""
+		from hrms.hr.doctype.leave_ledger_entry.leave_ledger_entry import get_remaining_leaves
+
+		if not self.new_leave_policy_assignment:
+			return
+
+		snapshot = json.loads(self.closure_snapshot or "{}")
+		old_end = getdate(self.old_end_date)
+		new_from = getdate(self.new_effective_from)
+		new_to = getdate(self.new_effective_to)
+		cf_transfers = []
+
+		old_allocs = frappe.get_all(
+			"Leave Allocation",
+			filters={
+				"leave_policy_assignment": self.old_leave_policy_assignment,
+				"docstatus": 1,
+			},
+			fields=["name", "leave_type"],
+		)
+
+		for old in old_allocs:
+			# Normalize any open CF flags so remaining calc + year reports are consistent
+			for led_name in frappe.get_all(
+				"Leave Ledger Entry",
+				filters={
+					"transaction_type": "Leave Allocation",
+					"transaction_name": old.name,
+					"docstatus": 1,
+					"is_expired": 0,
+					"is_carry_forward": 1,
+				},
+				pluck="name",
+			):
+				frappe.db.set_value(
+					"Leave Ledger Entry", led_name, "is_carry_forward", 0, update_modified=False
+				)
+
+			old_doc = frappe.get_doc("Leave Allocation", old.name)
+			old_doc.to_date = old_end
+			remaining = flt(get_remaining_leaves(old_doc), 3)
+			if remaining <= 0:
+				# Still mark expired if nothing left
+				if not cint(old_doc.expired):
+					frappe.db.set_value(
+						"Leave Allocation",
+						old.name,
+						{"expired": 1},
+						update_modified=False,
+					)
+				continue
+
+			# Transfer out on old (NOT is_expired) so reports don't show "Expired"
+			# while the same amount is added on the new LPA allocation.
+			create_leave_ledger_entry(
+				old_doc,
+				{
+					"leaves": -remaining,
+					"transaction_name": old.name,
+					"transaction_type": "Leave Allocation",
+					"from_date": old_end,
+					"to_date": old_end,
+					"is_carry_forward": 0,
+					"is_expired": 0,
+				},
+				submit=True,
+			)
+			transfer_out_ledger = frappe.db.get_value(
+				"Leave Ledger Entry",
+				{
+					"transaction_name": old.name,
+					"is_expired": 0,
+					"from_date": old_end,
+					"to_date": old_end,
+					"leaves": -remaining,
+					"docstatus": 1,
+				},
+				"name",
+				order_by="creation desc",
+			)
+			frappe.db.set_value(
+				"Leave Allocation",
+				old.name,
+				{
+					"expired": 1,
+					"new_leaves_allocated": 0,
+					"total_leaves_allocated": 0,
+					"unused_leaves": 0,
+					"carry_forwarded_leaves_count": remaining,
+				},
+				update_modified=False,
+			)
+
+			# Credit on new allocation for same leave type
+			new_alloc_name = frappe.db.get_value(
+				"Leave Allocation",
+				{
+					"leave_policy_assignment": self.new_leave_policy_assignment,
+					"leave_type": old.leave_type,
+					"docstatus": 1,
+				},
+				"name",
+			)
+			cf_ledger = None
+			if new_alloc_name:
+				new_doc = frappe.get_doc("Leave Allocation", new_alloc_name)
+				# Post as normal allocation credit (not is_carry_forward) so year
+				# leave-balance reports that sum non-CF credits still include it.
+				create_leave_ledger_entry(
+					new_doc,
+					{
+						"leaves": remaining,
+						"from_date": new_from,
+						"to_date": new_to,
+						"is_carry_forward": 0,
+						"is_expired": 0,
+					},
+					submit=True,
+				)
+				cf_ledger = frappe.db.get_value(
+					"Leave Ledger Entry",
+					{
+						"transaction_name": new_alloc_name,
+						"is_carry_forward": 0,
+						"leaves": remaining,
+						"from_date": new_from,
+						"to_date": new_to,
+						"docstatus": 1,
+					},
+					"name",
+					order_by="creation desc",
+				)
+				frappe.db.set_value(
+					"Leave Allocation",
+					new_alloc_name,
+					{
+						"new_leaves_allocated": flt(new_doc.new_leaves_allocated) + remaining,
+						"total_leaves_allocated": flt(new_doc.total_leaves_allocated) + remaining,
+					},
+					update_modified=False,
+				)
+				new_doc.add_comment(
+					"Info",
+					_("Carried {0} {1} from closed policy period ending {2} via Leave Policy Change").format(
+						remaining, old.leave_type, formatdate(old_end)
+					),
+				)
+
+			cf_transfers.append(
+				{
+					"leave_type": old.leave_type,
+					"old_allocation": old.name,
+					"new_allocation": new_alloc_name,
+					"leaves": remaining,
+					"transfer_out_ledger": transfer_out_ledger,
+					"cf_ledger": cf_ledger,
+				}
+			)
+
+		snapshot["cf_transfers"] = cf_transfers
+		self.db_set("closure_snapshot", json.dumps(snapshot, default=str))
 
 	def update_employee_type(self):
 		if not self.update_employee_employment_type:
@@ -529,6 +1022,10 @@ class LeavePolicyChange(Document):
 			return
 
 		snapshot = json.loads(self.closure_snapshot)
+		# Same-day replace cancelled the old LPA entirely — restore via overridden list.
+		if snapshot.get("replace_from_start"):
+			return
+
 		alloc_names = [a["name"] for a in snapshot.get("allocations", [])]
 
 		# Remove expiry ledgers created when new CF allocation expired the old one
@@ -550,6 +1047,46 @@ class LeavePolicyChange(Document):
 		for name in snapshot.get("rebalance_ledgers", []):
 			if frappe.db.exists("Leave Ledger Entry", name):
 				frappe.db.delete("Leave Ledger Entry", {"name": name})
+
+		# Remove expiry ledgers created on close; restore CF flags
+		for info in snapshot.get("expiry_ledgers", []):
+			expiry_name = info.get("expiry_ledger") if isinstance(info, dict) else None
+			if expiry_name and frappe.db.exists("Leave Ledger Entry", expiry_name):
+				frappe.db.delete("Leave Ledger Entry", {"name": expiry_name})
+			for led_name in (info.get("cf_cleared") or []) if isinstance(info, dict) else []:
+				if frappe.db.exists("Leave Ledger Entry", led_name):
+					frappe.db.set_value(
+						"Leave Ledger Entry",
+						led_name,
+						"is_carry_forward",
+						1,
+						update_modified=False,
+					)
+
+		# Remove transfer-out (old) and carried-in (new) ledgers from CF path
+		for t in snapshot.get("cf_transfers", []):
+			for key in ("transfer_out_ledger", "expiry_ledger", "cf_ledger"):
+				led = t.get(key)
+				if led and frappe.db.exists("Leave Ledger Entry", led):
+					frappe.db.delete("Leave Ledger Entry", {"name": led})
+			new_alloc = t.get("new_allocation")
+			leaves = flt(t.get("leaves"))
+			if new_alloc and frappe.db.exists("Leave Allocation", new_alloc) and leaves:
+				cur = frappe.db.get_value(
+					"Leave Allocation",
+					new_alloc,
+					["total_leaves_allocated", "new_leaves_allocated"],
+					as_dict=True,
+				)
+				frappe.db.set_value(
+					"Leave Allocation",
+					new_alloc,
+					{
+						"total_leaves_allocated": max(flt(cur.total_leaves_allocated) - leaves, 0),
+						"new_leaves_allocated": max(flt(cur.new_leaves_allocated) - leaves, 0),
+					},
+					update_modified=False,
+				)
 
 		for led in snapshot.get("ledgers", []):
 			if frappe.db.exists("Leave Ledger Entry", led["name"]):
@@ -726,6 +1263,38 @@ def get_change_preview(employee: str, change_date: str, new_employment_type: str
 		frappe.db.get_value("Leave Policy", new_policy, "title") if new_policy else None
 	)
 
+	replace_from_start = bool(
+		lpa and getdate(lpa.effective_from) >= change_date
+	)
+
+	overlapping = frappe.get_all(
+		"Leave Policy Assignment",
+		filters={
+			"employee": employee,
+			"docstatus": 1,
+			"name": ["!=", lpa.name if lpa else ""],
+			"effective_from": ["<=", new_to],
+			"effective_to": [">=", change_date],
+		},
+		fields=["name", "leave_policy", "effective_from", "effective_to"],
+		order_by="effective_from",
+	)
+	# Same-day replace: the "old" LPA itself must also be overridden
+	if replace_from_start and lpa:
+		overlapping = [
+			frappe._dict(
+				{
+					"name": lpa.name,
+					"leave_policy": lpa.leave_policy,
+					"effective_from": lpa.effective_from,
+					"effective_to": lpa.effective_to,
+				}
+			)
+		] + overlapping
+
+	for row in overlapping:
+		row["leave_policy_title"] = frappe.db.get_value("Leave Policy", row.leave_policy, "title")
+
 	return {
 		"employee_name": emp.employee_name,
 		"company": emp.company,
@@ -742,4 +1311,6 @@ def get_change_preview(employee: str, change_date: str, new_employment_type: str
 		"new_leave_policy": new_policy,
 		"new_leave_policy_title": new_policy_title,
 		"master_policy_found": bool(new_policy),
+		"overlapping_assignments": overlapping,
+		"replace_from_start": replace_from_start,
 	}

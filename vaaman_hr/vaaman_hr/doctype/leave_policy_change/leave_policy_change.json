@@ -27,10 +27,12 @@
   "new_policy_section",
   "new_leave_policy",
   "carry_forward",
+  "override_existing_assignments",
   "column_break_new",
   "new_effective_from",
   "new_effective_to",
   "new_leave_policy_assignment",
+  "overridden_assignments",
   "reason_section",
   "reason",
   "closure_snapshot",
@@ -182,11 +184,18 @@
    "reqd": 1
   },
   {
-   "default": "0",
-   "description": "Only carry unused leaves from the closed (rebalanced) period. Usually leave OFF for policy change so the new policy starts clean with its own prorata.",
+   "default": "1",
+   "description": "Unused leaves from the closed (rebalanced) old period are transferred and added to the new policy allocations.",
    "fieldname": "carry_forward",
    "fieldtype": "Check",
    "label": "Carry Forward Unused Leaves"
+  },
+  {
+   "default": "1",
+   "description": "Cancel other Leave Policy Assignments that overlap the new period (so this change can replace the system/default assignment).",
+   "fieldname": "override_existing_assignments",
+   "fieldtype": "Check",
+   "label": "Override Existing Assignments"
   },
   {
    "fieldname": "column_break_new",
@@ -212,6 +221,13 @@
    "no_copy": 1,
    "options": "Leave Policy Assignment",
    "read_only": 1
+  },
+  {
+   "fieldname": "overridden_assignments",
+   "fieldtype": "Small Text",
+   "label": "Overridden Assignments",
+   "read_only": 1,
+   "no_copy": 1
   },
   {
    "fieldname": "reason_section",
