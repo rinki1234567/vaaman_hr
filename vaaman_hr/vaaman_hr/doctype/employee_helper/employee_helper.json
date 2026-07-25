@@ -8,7 +8,6 @@
   "employee",
   "employee_name",
   "given_features",
-  "attendance_by",
   "face_embeddings",
   "fcm_token",
   "permission_banner_shown"
@@ -47,18 +46,12 @@
    "fieldname": "permission_banner_shown",
    "fieldtype": "Check",
    "label": "Permission Banner Shown"
-  },
-  {
-   "fieldname": "attendance_by",
-   "fieldtype": "Select",
-   "label": "Attendance By",
-   "options": "\nEmployee checkin\nFace and geo"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-23 12:17:43.130711",
+ "modified": "2025-11-25 13:24:02.628292",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Employee Helper",
