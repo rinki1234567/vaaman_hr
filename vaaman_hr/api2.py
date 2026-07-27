@@ -23,6 +23,54 @@ import math
 
 
 
+# @frappe.whitelist()
+# def get_current_shift_summary(employee):
+#     if not employee:
+#         frappe.throw("Employee ID is required.")
+
+#     today_str = get_local_now().strftime("%Y-%m-%d")
+    
+#     # Priority 1: Active Shift Assignment
+#     shift_type_name = frappe.db.get_value(
+#         "Shift Assignment",
+#         {
+#             "employee": employee,
+#             "start_date": ("<=", today_str),
+#             "end_date": (">=", today_str),
+#             "status": "Active",
+#             "docstatus": 1
+#         },
+#         "shift_type"
+#     )
+
+#     # Priority 2: Employee Default Shift
+#     if not shift_type_name:
+#         shift_type_name = frappe.db.get_value("Employee", employee, "default_shift")
+
+#     if not shift_type_name:
+#         return {"status": "none"}
+
+#     shift = frappe.db.get_value("Shift Type", shift_type_name, ["name", "start_time", "end_time"], as_dict=True)
+    
+#     if not shift:
+#         return {"status": "none"}
+
+#     # return {
+#     #     "status": "success",
+#     #     "shift_name": shift.name,
+#     #     # Format changed from "HH:mm:ss" to "hh:mm A" (e.g., 09:00 AM)
+#     #     "start_time": format_time(shift.start_time, "hh:mm A") if shift.start_time else "--:--",
+#     #     "end_time": format_time(shift.end_time, "hh:mm A") if shift.end_time else "--:--"
+#     # }
+#     return {
+#         "status": "success",
+#         "shift_name": shift.name,
+#         # Send raw 24-hour time strings directly to the frontend
+#         "start_time": str(shift.start_time) if shift.start_time else "--:--",
+#         "end_time": str(shift.end_time) if shift.end_time else "--:--"
+#     }
+
+
 @frappe.whitelist()
 def get_current_shift_summary(employee):
     if not employee:
@@ -55,20 +103,39 @@ def get_current_shift_summary(employee):
     if not shift:
         return {"status": "none"}
 
-    # return {
-    #     "status": "success",
-    #     "shift_name": shift.name,
-    #     # Format changed from "HH:mm:ss" to "hh:mm A" (e.g., 09:00 AM)
-    #     "start_time": format_time(shift.start_time, "hh:mm A") if shift.start_time else "--:--",
-    #     "end_time": format_time(shift.end_time, "hh:mm A") if shift.end_time else "--:--"
-    # }
+    # FIX: Helper to force a strict 24-hour string regardless of Frappe's cache state
+    def safe_24h_format(time_val):
+        if not time_val:
+            return "--:--"
+        try:
+            # If it's a timedelta (Direct database hit)
+            if isinstance(time_val, datetime.timedelta):
+                total_seconds = int(time_val.total_seconds())
+            else:
+                # If it's a string (Redis cache hit, e.g., "18:30:00")
+                time_str = str(time_val).strip()
+                parts = time_str.split(':')
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                total_seconds = (hours * 3600) + (minutes * 60)
+            
+            # Extract hours and minutes, using % 24 to normalize overnight/shifted hours
+            h = (total_seconds // 3600) % 24
+            m = (total_seconds % 3600) // 60
+            
+            # Return strict HH:MM string for the frontend React Native regex
+            return f"{h:02d}:{m:02d}"
+        except Exception:
+            # Fallback just in case parsing fails
+            return str(time_val)
+
     return {
         "status": "success",
         "shift_name": shift.name,
-        # Send raw 24-hour time strings directly to the frontend
-        "start_time": str(shift.start_time) if shift.start_time else "--:--",
-        "end_time": str(shift.end_time) if shift.end_time else "--:--"
+        "start_time": safe_24h_format(shift.start_time),
+        "end_time": safe_24h_format(shift.end_time)
     }
+
 
 def get_local_now():
     """
