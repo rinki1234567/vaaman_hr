@@ -8,6 +8,7 @@
   "location_t_section",
   "branch",
   "given_features",
+  "attendance_by",
   "app_version",
   "shift_end_cushion"
  ],
@@ -38,12 +39,18 @@
    "fieldname": "shift_end_cushion",
    "fieldtype": "Int",
    "label": "Shift End Cushion"
+  },
+  {
+   "fieldname": "attendance_by",
+   "fieldtype": "Select",
+   "label": "Attendance By",
+   "options": "\nEmployee checkin\nFace and geo"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-25 13:24:01.828197",
+ "modified": "2026-07-23 08:21:11.427060",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "VaamanHR Settings",
