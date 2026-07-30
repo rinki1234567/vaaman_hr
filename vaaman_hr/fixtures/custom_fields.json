@@ -228,6 +228,18 @@
     },
     {
         "doctype": "Custom Field",
+        "dt": "Salary Structure Assignment",
+        "module": "Vaaman Hr",
+        "name": "Salary Structure Assignment-custom_calculate_pph",
+        "fieldname": "custom_calculate_pph",
+        "fieldtype": "Check",
+        "label": "Calculate PPH",
+        "insert_after": "custom_restricted_pf",
+        "__islocal": 1,
+        "allow_on_submit": 1
+    },
+    {
+        "doctype": "Custom Field",
         "dt": "Salary Slip",
         "module": "Vaaman Hr",
         "name": "Salary Slip-custom_paid_leaves",
