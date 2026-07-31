@@ -5,20 +5,71 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "enable_auto_payment_request"
+  "general_tab",
+  "enable_auto_payment_request",
+  "kyc_tab",
+  "kyc_section",
+  "enable_pan_match",
+  "column_break_kyc",
+  "enable_aadhaar_match",
+  "kyc_help_section",
+  "kyc_help"
  ],
  "fields": [
+  {
+   "fieldname": "general_tab",
+   "fieldtype": "Tab Break",
+   "label": "General"
+  },
   {
    "default": "0",
    "fieldname": "enable_auto_payment_request",
    "fieldtype": "Check",
    "label": "Enable Auto Payment Request"
+  },
+  {
+   "fieldname": "kyc_tab",
+   "fieldtype": "Tab Break",
+   "label": "KYC Verification"
+  },
+  {
+   "fieldname": "kyc_section",
+   "fieldtype": "Section Break",
+   "label": "Employee PAN / Aadhaar Checks"
+  },
+  {
+   "default": "0",
+   "description": "Validates the employee's PAN and matches the recorded name and date of birth during Employee save.",
+   "fieldname": "enable_pan_match",
+   "fieldtype": "Check",
+   "label": "Enable PAN Match"
+  },
+  {
+   "fieldname": "column_break_kyc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Validates whether the employee's PAN is linked with the recorded Aadhaar number during Employee save.",
+   "fieldname": "enable_aadhaar_match",
+   "fieldtype": "Check",
+   "label": "Enable Aadhaar Match"
+  },
+  {
+   "fieldname": "kyc_help_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "kyc_help",
+   "fieldtype": "HTML",
+   "options": "<div class=\"text-muted\" style=\"padding: 8px 0;\">\n<ul>\n<li><b>PAN Match</b> verifies PAN status and confirms that the employee name and date of birth match official records. Requires PAN, Employee Name, and Date of Birth.</li>\n<li><b>Aadhaar Match</b> confirms PAN\u2013Aadhaar linkage. Requires PAN and Aadhaar Number.</li>\n<li>Enable only the checks required for your process. When both options are disabled, no external KYC verification is triggered on Employee save.</li>\n</ul>\n</div>"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2024-12-17 11:52:47.397802",
+ "modified": "2026-07-31 18:43:00.000000",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Vaaman Settings",
