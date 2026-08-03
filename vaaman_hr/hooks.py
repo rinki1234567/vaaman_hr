@@ -180,8 +180,10 @@ doc_events = {
     },
     "Salary Structure Assignment": {
         "before_save": "vaaman_hr.vaaman_hr.salery_component_field_add_buttton.on_salary_assignment_update"
-    }
-
+    },
+    "Employee": {
+    "on_update": "vaaman_hr.vaaman_hr.doctype.employee_helper.update_branch.update_branch"
+    },
 }
 
 
