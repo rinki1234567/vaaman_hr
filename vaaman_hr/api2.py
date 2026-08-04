@@ -759,6 +759,8 @@ def log_geofence_event(employee, log_type, latitude, longitude, timestamp,permis
         checkin.insert(ignore_permissions=True)
 
         frappe.db.commit()
+        if log_type == "OUT" or int(permission_revoked) == 1:
+            frappe.enqueue(method=notify_managers_on_geofence_event, queue='short', employee=employee, log_type=log_type)
         return {"status": "success", "message": f"Geofence event '{log_type}' logged successfully."}
     
     except Exception as e:
@@ -823,12 +825,14 @@ def log_geofence_event_batch(employee, events):
             checkin.custom_geofence_in_or_out = 1
 
             # Read and save permission_revoked from batch queue payload
-            checkin.custom_permission_revoked = int(
-                event.get("permission_revoked", 0)
-            )
+            perm_revoked = int(event.get("permission_revoked", 0))
+            checkin.custom_permission_revoked = perm_revoked
 
             checkin.insert(ignore_permissions=True)
             logged_count += 1
+            
+            if event_log_type == "OUT" or perm_revoked == 1:
+                frappe.enqueue(method=notify_managers_on_geofence_event, queue='short', employee=employee, log_type=event_log_type)
 
         except Exception:
             skipped_count += 1
@@ -841,6 +845,10 @@ def log_geofence_event_batch(employee, events):
         "logged": logged_count,
         "skipped": skipped_count,
     }
+
+
+
+
 @frappe.whitelist()
 def create_employee_with_user(first_name, last_name, email, company, date_of_joining, gender, date_of_birth, create_user):
     should_create_user = frappe.utils.cint(create_user) == 1
@@ -2103,3 +2111,217 @@ def get_filtered_historical_paths_with_sql(date, department=None, branch=None, c
         })
 
     return {"paths": final_paths}
+
+
+
+def notify_managers_on_geofence_event(employee, log_type):
+    try:
+        emp_doc = frappe.get_doc("Employee", employee)
+        cost_center = emp_doc.payroll_cost_center
+        
+        if not cost_center:
+            return
+            
+        permitted_users = frappe.get_all("User Permission", 
+            filters={"allow": "Cost Center", "for_value": cost_center}, 
+            pluck="user",
+            ignore_permissions=True
+        )
+        
+        if not permitted_users:
+            return
+            
+        target_roles = ["Site Head", "Site HR User", "Site HR Manager"]
+        
+        valid_users = frappe.get_all("Has Role", 
+            filters={"parent": ["in", permitted_users], "role": ["in", target_roles]}, 
+            pluck="parent",
+            ignore_permissions=True
+        )
+        
+        valid_users = list(set(valid_users))
+        if not valid_users:
+            return
+            
+        emp_name = emp_doc.employee_name or emp_doc.first_name
+        action = "entered" if log_type == "IN" else "exited"
+        title = "Geofence Alert 📍"
+        body = f"{emp_name} ({employee}) has {action} the geofence."
+        
+        for user_id in valid_users:
+            manager_emp_id = frappe.db.get_value("Employee", {"user_id": user_id}, "name")
+            if manager_emp_id and manager_emp_id != employee:
+                notification = frappe.new_doc("App Push Notification")
+                notification.title = title
+                notification.content = body
+                notification.send_to_employee = manager_emp_id
+                
+                notification.insert(ignore_permissions=True)
+                notification.submit()
+        
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Geofence Notification Error")
+
+@frappe.whitelist()
+def get_approver_team_status():
+    current_user = frappe.session.user
+    
+    # 1. Find the Employee ID of the currently logged-in manager
+    current_emp_id = frappe.db.get_value("Employee", {"user_id": current_user}, "name")
+    
+    employees = []
+    
+    # 2. Get employees for this manager based on cost center permissions
+    if current_user == "Administrator" or "System Manager" in frappe.get_roles(current_user):
+        employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "employee_name", "image", "custom_branch_unit"])
+    else:
+        user_cost_centers = frappe.get_all("User Permission", 
+            filters={"user": current_user, "allow": "Cost Center"}, 
+            pluck="for_value",
+            ignore_permissions=True
+        )
+        
+        if user_cost_centers:
+            employees = frappe.get_all("Employee", 
+                filters={"payroll_cost_center": ["in", user_cost_centers], "status": "Active"}, 
+                fields=["name", "employee_name", "image", "custom_branch_unit"],
+                ignore_permissions=True
+            )
+            
+    # MINOR CHANGE: Filter out the manager from their own team list
+    if current_emp_id:
+        employees = [e for e in employees if e.name != current_emp_id]
+        
+    if not employees:
+        return []
+        
+    emp_ids = [e.name for e in employees]
+    emp_map = {e.name: e for e in employees}
+    
+    branch_units = list(set([e.custom_branch_unit for e in employees if e.custom_branch_unit]))
+    geofences = {}
+    if branch_units:
+        bu_docs = frappe.get_all("Branch Unit", filters={"name": ["in", branch_units]}, fields=["name", "geofence_vertices"])
+        for bu in bu_docs:
+            if bu.geofence_vertices:
+                try:
+                    geofences[bu.name] = {"vertices": json.loads(bu.geofence_vertices)}
+                except Exception:
+                    pass
+    
+    # 3. Fetch the latest check-in for these employees securely and efficiently
+    format_string = ', '.join(['%s'] * len(emp_ids))
+    query = f"""
+        SELECT 
+            c.employee, c.log_type, c.time, c.latitude, c.longitude, 
+            c.custom_geofence_in_or_out, c.custom_permission_revoked, 
+            c.custom_face_checkin_or_checkout, c.custom_outdoor_duty
+        FROM `tabEmployee Checkin` c
+        INNER JOIN (
+            SELECT employee, MAX(time) as max_time
+            FROM `tabEmployee Checkin`
+            WHERE employee IN ({format_string})
+            GROUP BY employee
+        ) latest ON c.employee = latest.employee AND c.time = latest.max_time
+    """
+    
+    latest_checkins = frappe.db.sql(query, tuple(emp_ids), as_dict=True)
+    
+    seen_employees = set()
+    result = []
+    
+    for checkin in latest_checkins:
+        emp_id = checkin.employee
+        if emp_id in seen_employees:
+            continue
+        seen_employees.add(emp_id)
+        
+        # 4. Determine status text based on rules
+        status_text = "Unknown"
+        if checkin.custom_permission_revoked:
+            status_text = "Location Permission Revoked"
+        elif checkin.custom_geofence_in_or_out:
+            status_text = "Geofence Entry" if checkin.log_type == "IN" else "Geofence Exit"
+        else:
+            action = "Checked In" if checkin.log_type == "IN" else "Checked Out"
+            method = "with Face" if checkin.custom_face_checkin_or_checkout else "without Face"
+            
+            if checkin.custom_outdoor_duty and checkin.log_type == "IN":
+                status_text = f"{action} (Outdoor) {method}"
+            else:
+                status_text = f"{action} {method}"
+                
+        emp_info = emp_map.get(emp_id)
+        
+        result.append({
+            "employee": emp_id,
+            "employee_name": emp_info.employee_name,
+            "image": emp_info.image,
+            "status": status_text,
+            "time": checkin.time,
+            "latitude": checkin.latitude,
+            "longitude": checkin.longitude,
+            "geofence": geofences.get(emp_info.custom_branch_unit) if emp_info.custom_branch_unit else None
+        })
+        
+    # 5. Include employees who have NO checkins at all
+    for emp_id, emp_info in emp_map.items():
+        if emp_id not in seen_employees:
+            result.append({
+                "employee": emp_id,
+                "employee_name": emp_info.employee_name,
+                "image": emp_info.image,
+                "status": "No check-in records",
+                "time": None,
+                "latitude": None,
+                "longitude": None,
+                "geofence": geofences.get(emp_info.custom_branch_unit) if emp_info.custom_branch_unit else None
+            })
+            
+    # Sort by time descending (newest activity first), pushing null times to the bottom
+    result.sort(key=lambda x: x["time"] or datetime.min, reverse=True)
+    
+    return result
+
+
+
+
+
+def validate_device_on_login(login_manager):
+    user = login_manager.user
+    
+    # Bypass for administrators or system managers
+    if user == "Administrator" or "System Manager" in frappe.get_roles(user):
+        return
+        
+    # Get the device ID sent from the mobile app during login
+    device_id = frappe.form_dict.get("device_id")
+    
+    frappe.log_error(f"Login trace for {user}. Received device_id: {device_id}", "Device Validation Log")
+    
+    # 1. Fetch the Employee document for this user
+    emp_id = frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name")
+    if not emp_id:
+        return # If they aren't an active employee, skip device validation
+        
+    # Fetch the Employee Helper document
+    emp_helper = frappe.db.get_value("Employee Helper", {"employee": emp_id}, "name")
+    if not emp_helper:
+        return # Cannot bind if helper document does not exist yet
+        
+    # 2. Fetch their currently registered device ID
+    registered_device = frappe.db.get_value("Employee Helper", emp_helper, "registered_device_id")
+    
+    # 3. If they don't have a device registered yet, and they passed one, bind it!
+    if not registered_device:
+        if device_id:
+            frappe.db.set_value("Employee Helper", emp_helper, "registered_device_id", device_id)
+        return
+        
+    # 4. If they DO have a registered device, check if the incoming one matches
+    if device_id and device_id != registered_device:
+        # Throw an AuthenticationError to forcefully block the login
+        frappe.throw(
+            "This account is registered to another device. Please contact HR to reset your device binding.", 
+            frappe.AuthenticationError
+        )

@@ -317,5 +317,8 @@ fixtures = [
     # {"dt":"Property Setter","filter":[["module","=","Vaaman Hr"]]}
     
 ]
+
+on_login = "vaaman_hr.api2.validate_device_on_login" 
+
 # Ensure the function is called during startup
 apply_monkey_patch()

@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "employee",
+  "registered_device_id",
   "employee_name",
   "given_features",
   "attendance_by",
@@ -53,12 +54,17 @@
    "fieldtype": "Select",
    "label": "Attendance By",
    "options": "\nEmployee checkin\nFace and geo"
+  },
+  {
+   "fieldname": "registered_device_id",
+   "fieldtype": "Data",
+   "label": "Registered Device ID"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-23 12:17:43.130711",
+ "modified": "2026-07-31 17:44:02.721229",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Employee Helper",
