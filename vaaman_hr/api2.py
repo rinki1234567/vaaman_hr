@@ -2285,8 +2285,6 @@ def get_approver_team_status():
 
 
 
-
-
 def validate_device_on_login(login_manager):
     user = login_manager.user
     
@@ -2294,31 +2292,50 @@ def validate_device_on_login(login_manager):
     if user == "Administrator" or "System Manager" in frappe.get_roles(user):
         return
         
+    # 1. Fetch the Employee document and their branch
+    emp_data = frappe.db.get_value(
+        "Employee", 
+        {"user_id": user, "status": "Active"}, 
+        ["name", "branch"], 
+        as_dict=True
+    )
+    
+    if not emp_data or not emp_data.branch:
+        return # Skip if not an active employee or if they have no branch assigned
+        
+    emp_id = emp_data.name
+    branch = emp_data.branch
+    
+    # 2. Check if device binding is enabled for this branch in VaamanHR Settings
+    device_binding_enabled = frappe.db.get_value(
+        "VaamanHR Settings", 
+        {"branch": branch}, 
+        "device_binding"
+    )
+    
+    if not device_binding_enabled:
+        return # Simply return if device binding is not checked for this branch
+        
     # Get the device ID sent from the mobile app during login
     device_id = frappe.form_dict.get("device_id")
     
     frappe.log_error(f"Login trace for {user}. Received device_id: {device_id}", "Device Validation Log")
     
-    # 1. Fetch the Employee document for this user
-    emp_id = frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name")
-    if not emp_id:
-        return # If they aren't an active employee, skip device validation
-        
     # Fetch the Employee Helper document
     emp_helper = frappe.db.get_value("Employee Helper", {"employee": emp_id}, "name")
     if not emp_helper:
         return # Cannot bind if helper document does not exist yet
         
-    # 2. Fetch their currently registered device ID
+    # 3. Fetch their currently registered device ID
     registered_device = frappe.db.get_value("Employee Helper", emp_helper, "registered_device_id")
     
-    # 3. If they don't have a device registered yet, and they passed one, bind it!
+    # 4. If they don't have a device registered yet, and they passed one, bind it!
     if not registered_device:
         if device_id:
             frappe.db.set_value("Employee Helper", emp_helper, "registered_device_id", device_id)
         return
         
-    # 4. If they DO have a registered device, check if the incoming one matches
+    # 5. If they DO have a registered device, check if the incoming one matches
     if device_id and device_id != registered_device:
         # Throw an AuthenticationError to forcefully block the login
         frappe.throw(
