@@ -446,6 +446,47 @@ class TestHeadOfficePolicyReapplyWindow(FrappeTestCase):
 		self.assertTrue(_within_reapply_window(add_days(today(), -REAPPLY_LOOKBACK_DAYS)))
 		self.assertFalse(_within_reapply_window(add_days(today(), -(REAPPLY_LOOKBACK_DAYS + 1))))
 
+	def test_policy_only_for_head_office_branch_employees(self):
+		"""Non–Head Office employees must never get HO status overwrite."""
+		from unittest.mock import patch
+		from vaaman_hr.vaaman_hr import half_day_leaves as hdl
+		from vaaman_hr.vaaman_hr.head_office_policy import (
+			HEAD_OFFICE_BRANCH,
+			is_head_office_employee,
+		)
+
+		self.assertEqual(HEAD_OFFICE_BRANCH, "Head Office")
+
+		non_ho = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "branch": ["!=", "Head Office"]},
+			"name",
+		)
+		ho = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "branch": "Head Office"},
+			"name",
+		)
+		if non_ho:
+			self.assertFalse(is_head_office_employee(non_ho))
+		if ho:
+			self.assertTrue(is_head_office_employee(ho))
+
+		fake_att = frappe._dict(
+			name="ATT-NON-HO",
+			employee=non_ho or "EMP-NON-HO",
+			attendance_date=today(),
+			docstatus=1,
+			leave_application=None,
+			attendance_request=None,
+		)
+		with patch.object(hdl, "is_head_office_employee", return_value=False), patch.object(
+			hdl, "get_checkin_logs"
+		) as logs, patch.object(hdl, "apply_attendance_status") as apply:
+			hdl.apply_head_office_policy_to_attendance(fake_att, enforce_lookback=False)
+			logs.assert_not_called()
+			apply.assert_not_called()
+
 	def test_reapply_skips_old_attendance_dates(self):
 		"""Checkin-driven re-apply must not touch attendance older than lookback."""
 		from unittest.mock import patch

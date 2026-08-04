@@ -79,12 +79,18 @@ def get_required_full_day_hours(attendance_date, late_entry=0, early_exit=0):
 
 
 def is_head_office_employee(employee):
+	"""HO late/hours/half-day policy applies ONLY when Employee.branch is Head Office.
+
+	Other site/project branches are never covered by this policy.
+	"""
+	if not employee:
+		return False
 	return frappe.db.get_value("Employee", employee, "branch") == HEAD_OFFICE_BRANCH
 
 
 def head_office_branch_condition(alias="e"):
-	"""SQL fragment: employee or attendance custom_branch is Head Office."""
-	return f"({alias}.branch = '{HEAD_OFFICE_BRANCH}' OR att.custom_branch = '{HEAD_OFFICE_BRANCH}')"
+	"""SQL: restrict to Head Office employees only (Employee.branch)."""
+	return f"{alias}.branch = '{HEAD_OFFICE_BRANCH}'"
 
 
 def is_exempt_from_head_office_policy(attendance):
