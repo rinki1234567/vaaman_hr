@@ -82,13 +82,17 @@ class TestSalarySlipHalfDayMatch(FrappeTestCase):
 	"""Salary slip absent/payable must align with half_day_status semantics."""
 
 	def test_other_half_absent_counts_half_absent_day(self):
-		"""Half Day + Other Half Absent → 0.5 absent (payment reduced), payable fraction 0.5."""
-		# Mirrors CustomSalarySlip: half_day_status==Absent adds to absent_days
+		"""Payable days follow HRMS: paid leave + Other Half Present = 1.0."""
 		daily_frac = 0.5
+		leave_type_map = {
+			"Leave Without Pay": {"is_lwp": 1, "is_ppl": 0, "fraction_of_daily_salary_per_leave": 1},
+		}
 		rows = [
 			SimpleNamespace(status="Half Day", half_day_status="Absent", leave_type=None),
 			SimpleNamespace(status="Half Day", half_day_status="Present", leave_type="Privilege Leave"),
 			SimpleNamespace(status="Present", half_day_status="", leave_type=None),
+			SimpleNamespace(status="Half Day", half_day_status="Present", leave_type="Leave Without Pay"),
+			SimpleNamespace(status="Half Day", half_day_status="Absent", leave_type="Leave Without Pay"),
 		]
 
 		half_absent_count = sum(
@@ -101,22 +105,21 @@ class TestSalarySlipHalfDayMatch(FrappeTestCase):
 			if r.status == "Present":
 				payable += 1
 			elif r.status == "Half Day":
+				is_lwp_or_ppl = r.leave_type in leave_type_map and (
+					leave_type_map[r.leave_type].get("is_lwp")
+					or leave_type_map[r.leave_type].get("is_ppl")
+				)
 				if r.half_day_status == "Absent":
-					payable += daily_frac
+					if not is_lwp_or_ppl:
+						payable += daily_frac
+				elif is_lwp_or_ppl:
+					payable += 1 - daily_frac
 				else:
-					payable += daily_frac
+					payable += 1
 
-		self.assertEqual(absent_from_half, 0.5)
-		self.assertEqual(payable, 2.0)  # 0.5 + 0.5 + 1.0
-
-		# Bug case we fixed: first-half wrongly marked Present would under-count absent
-		wrong_rows = [
-			SimpleNamespace(status="Half Day", half_day_status="Present", leave_type=None),
-		]
-		wrong_half_absent = sum(
-			1 for r in wrong_rows if r.status == "Half Day" and r.half_day_status == "Absent"
-		)
-		self.assertEqual(wrong_half_absent, 0)  # mismatch vs worked-only-half reality
+		self.assertEqual(absent_from_half, 1.0)  # two Other Half Absent rows
+		# 0.5 (HD/A) + 1.0 (PL+Present) + 1.0 (Present) + 0.5 (LWP+Present) + 0 (LWP+Absent)
+		self.assertEqual(payable, 3.0)
 
 
 class TestAttendanceRequestCheckinRelink(FrappeTestCase):

@@ -157,16 +157,36 @@ class CustomSalarySlip(ERPNextSalarySlip):
                     elif leave_type in PAID_LEAVE_TYPES or not leave_type:
                         payable_days += 1
                 elif status == "Half Day":
-                    if row.half_day_status == "Absent":
-                        # Present for half the day; other half is absent.
-                        payable_days += daily_wages_fraction_for_half_day
-                    elif row.leave_type in leave_type_map and (
+                    # Align with HRMS default (payroll_based_on=Attendance):
+                    # payment_days = working − LWP − absent − (Other Half Absent)×0.5
+                    # So: paid leave + Other Half Present → full day (1.0)
+                    is_lwp_or_ppl = row.leave_type in leave_type_map and (
                         leave_type_map[row.leave_type].get("is_lwp")
                         or leave_type_map[row.leave_type].get("is_ppl")
-                    ):
-                        payable_days += 1 - daily_wages_fraction_for_half_day
+                    )
+                    if row.half_day_status == "Absent":
+                        if is_lwp_or_ppl:
+                            # 0.5 LWP/PPL + 0.5 other-half absent → no pay for the day
+                            pass
+                        else:
+                            # Paid-leave half or worked half only
+                            payable_days += daily_wages_fraction_for_half_day
+                    elif is_lwp_or_ppl:
+                        # Unpaid leave half + other half Present → pay worked half only
+                        equivalent_lwp = 1 - daily_wages_fraction_for_half_day
+                        if leave_type_map[row.leave_type].get("is_ppl"):
+                            frac = (
+                                leave_type_map[row.leave_type].get(
+                                    "fraction_of_daily_salary_per_leave"
+                                )
+                                or 1
+                            )
+                            equivalent_lwp *= frac
+                        payable_days += 1 - equivalent_lwp
                     else:
-                        payable_days += daily_wages_fraction_for_half_day
+                        # Paid leave + Other Half Present (or Present without unpaid leave)
+                        # → count as full present (HRMS default)
+                        payable_days += 1
             elif current_date in national_holiday_dates:
                 payable_days += 1
             elif consider_unmarked_as == "Present" and not is_holiday:
