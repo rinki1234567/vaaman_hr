@@ -318,13 +318,14 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	if is_beyond_allowed_late(in_dt) and not has_half_day_leave:
 		return working_hours, "Absent", "", 0, 0
 
-	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation)
+	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation).
+	# half_day_status = Status for Other Half → second half not worked → Absent
 	if (
 		working_hours >= rules["min_half_day_hours"]
 		and working_hours < required_full_day_hours
 		and meets_first_half_timing(attendance_date, in_dt, out_dt)
 	):
-		return working_hours, "Half Day", "Present", late_entry, early_exit
+		return working_hours, "Half Day", "Absent", late_entry, early_exit
 
 	if is_beyond_allowed_early_exit(out_dt, attendance_date):
 		return working_hours, "Absent", "", 0, 0
