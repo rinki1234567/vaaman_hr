@@ -7,10 +7,13 @@ from types import SimpleNamespace
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import flt, getdate
+from frappe.utils import flt, getdate, add_days, today
 
 from vaaman_hr.vaaman_hr.head_office_policy import compute_head_office_status
-from vaaman_hr.overrides.attendance_request import CustomAttendanceRequest
+from vaaman_hr.overrides.attendance_utils import (
+	cancel_leave_attendance,
+	relink_checkins_from_cancelled_attendance,
+)
 
 
 def _log(log_type, time_str, day="2026-07-13"):
@@ -235,10 +238,7 @@ class TestAttendanceRequestCheckinRelink(FrappeTestCase):
 		finally:
 			frappe.flags.skip_head_office_attendance_validation = False
 
-		ar = frappe.new_doc("Attendance Request")
-		ar.employee = self.employee
-		ar.company = self.company
-		CustomAttendanceRequest._relink_checkins_from_cancelled_attendance(ar, new, self.att_date)
+		relink_checkins_from_cancelled_attendance(self.employee, new, self.att_date)
 
 		self.assertEqual(frappe.db.get_value("Employee Checkin", ck_in.name, "attendance"), new.name)
 		self.assertEqual(frappe.db.get_value("Employee Checkin", ck_out.name, "attendance"), new.name)
@@ -252,6 +252,97 @@ class TestAttendanceRequestCheckinRelink(FrappeTestCase):
 		self.assertIsNotNone(updated.in_time)
 		self.assertIsNotNone(updated.out_time)
 		self.assertEqual(flt(updated.working_hours, 2), 5.22)
+		self.assertEqual(updated.half_day_status, "Present")
+		self.assertEqual(updated.modify_half_day_status, 0)
+
+	def test_leave_cancel_then_recreate_relinks_checkins(self):
+		"""Leave cancel → new Half Day attendance must inherit punches (point 2)."""
+		# Checkins + submitted leave attendance
+		ck_in = frappe.get_doc(
+			{
+				"doctype": "Employee Checkin",
+				"employee": self.employee,
+				"time": f"{self.att_date} 12:11:56",
+				"log_type": "IN",
+				"skip_auto_attendance": 1,
+				"latitude": 19.0760,
+				"longitude": 72.8777,
+			}
+		).insert(ignore_permissions=True)
+		ck_out = frappe.get_doc(
+			{
+				"doctype": "Employee Checkin",
+				"employee": self.employee,
+				"time": f"{self.att_date} 17:25:11",
+				"log_type": "OUT",
+				"skip_auto_attendance": 1,
+				"latitude": 19.0760,
+				"longitude": 72.8777,
+			}
+		).insert(ignore_permissions=True)
+
+		frappe.flags.skip_head_office_attendance_validation = True
+		try:
+			old = frappe.get_doc(
+				{
+					"doctype": "Attendance",
+					"employee": self.employee,
+					"attendance_date": self.att_date,
+					"company": self.company,
+					"status": "Half Day",
+					"half_day_status": "Present",
+					"leave_type": "Privilege Leave",
+					"shift": "Head Office",
+					"in_time": f"{self.att_date} 12:11:56",
+					"out_time": f"{self.att_date} 17:25:11",
+					"working_hours": 5.22,
+				}
+			)
+			old.flags.ignore_validate = True
+			old.flags.ignore_links = True
+			old.insert(ignore_permissions=True)
+			old.submit()
+		finally:
+			frappe.flags.skip_head_office_attendance_validation = False
+
+		frappe.db.set_value("Employee Checkin", ck_in.name, "attendance", old.name, update_modified=False)
+		frappe.db.set_value("Employee Checkin", ck_out.name, "attendance", old.name, update_modified=False)
+
+		# Cancel via our helper (leave_application filter — use None to cancel by status range)
+		cancel_leave_attendance(self.employee, self.att_date, self.att_date, leave_application=None)
+
+		self.assertEqual(frappe.db.get_value("Attendance", old.name, "docstatus"), 2)
+
+		# New leave attendance
+		frappe.flags.skip_head_office_attendance_validation = True
+		try:
+			new = frappe.get_doc(
+				{
+					"doctype": "Attendance",
+					"employee": self.employee,
+					"attendance_date": self.att_date,
+					"company": self.company,
+					"status": "Half Day",
+					"half_day_status": "Present",
+					"modify_half_day_status": 1,
+					"leave_type": "Privilege Leave",
+					"shift": "Head Office",
+				}
+			)
+			new.flags.ignore_validate = True
+			new.insert(ignore_permissions=True)
+			new.submit()
+		finally:
+			frappe.flags.skip_head_office_attendance_validation = False
+
+		relink_checkins_from_cancelled_attendance(self.employee, new, self.att_date)
+
+		self.assertEqual(frappe.db.get_value("Employee Checkin", ck_in.name, "attendance"), new.name)
+		self.assertEqual(frappe.db.get_value("Employee Checkin", ck_out.name, "attendance"), new.name)
+		updated = frappe.db.get_value(
+			"Attendance", new.name, ["in_time", "out_time", "half_day_status", "modify_half_day_status"], as_dict=True
+		)
+		self.assertIsNotNone(updated.in_time)
 		self.assertEqual(updated.half_day_status, "Present")
 		self.assertEqual(updated.modify_half_day_status, 0)
 
@@ -339,3 +430,46 @@ class TestHeadOfficeLiveAttendanceSalaryMatch(FrappeTestCase):
 			self.assertEqual(c.half_day_status, "Present")
 			linked = frappe.db.count("Employee Checkin", {"attendance": "HR-ATT-2026-1469132"})
 			self.assertGreaterEqual(linked, 2)
+
+
+class TestHeadOfficePolicyReapplyWindow(FrappeTestCase):
+	"""Point 3: re-apply on checkin/update, but never rewrite old attendance."""
+
+	def test_lookback_window(self):
+		from vaaman_hr.vaaman_hr.half_day_leaves import (
+			REAPPLY_LOOKBACK_DAYS,
+			_within_reapply_window,
+		)
+		from frappe.utils import add_days, today
+
+		self.assertTrue(_within_reapply_window(today()))
+		self.assertTrue(_within_reapply_window(add_days(today(), -REAPPLY_LOOKBACK_DAYS)))
+		self.assertFalse(_within_reapply_window(add_days(today(), -(REAPPLY_LOOKBACK_DAYS + 1))))
+
+	def test_reapply_skips_old_attendance_dates(self):
+		"""Checkin-driven re-apply must not touch attendance older than lookback."""
+		from unittest.mock import patch
+		from vaaman_hr.vaaman_hr import half_day_leaves as hdl
+
+		old_date = add_days(today(), -(hdl.REAPPLY_LOOKBACK_DAYS + 5))
+		fake_att = frappe._dict(
+			name="ATT-OLD",
+			employee="EMP-HO",
+			attendance_date=old_date,
+			docstatus=1,
+			leave_application=None,
+			attendance_request=None,
+		)
+
+		with patch.object(hdl, "is_head_office_employee", return_value=True), patch.object(
+			hdl, "get_checkin_logs", return_value=[object()]
+		), patch.object(
+			hdl, "compute_head_office_status", return_value=(5.0, "Half Day", "Absent", 0, 0)
+		) as compute, patch.object(hdl, "apply_attendance_status") as apply:
+			hdl.apply_head_office_policy_to_attendance(fake_att, enforce_lookback=True)
+			compute.assert_not_called()
+			apply.assert_not_called()
+
+			# Create-time insert path still allowed for any date
+			hdl.apply_head_office_policy_to_attendance(fake_att, enforce_lookback=False)
+			compute.assert_called_once()

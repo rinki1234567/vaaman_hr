@@ -4,6 +4,8 @@ from frappe.utils import add_days, date_diff
 
 from hrms.hr.doctype.attendance_request.attendance_request import AttendanceRequest
 
+from vaaman_hr.overrides.attendance_utils import relink_checkins_from_cancelled_attendance
+
 
 class CustomAttendanceRequest(AttendanceRequest):
 
@@ -93,56 +95,8 @@ class CustomAttendanceRequest(AttendanceRequest):
             new_doc.custom_branch = branch
             new_doc.insert(ignore_permissions=True)
             new_doc.submit()
-            # Leave cancel often db_sets docstatus=2 (skips on_cancel), so checkins
-            # stay on the cancelled attendance — move them to the replacement record.
-            self._relink_checkins_from_cancelled_attendance(new_doc, date)
-
-    def _relink_checkins_from_cancelled_attendance(self, new_doc, date):
-        cancelled = frappe.get_all(
-            "Attendance",
-            filters={
-                "employee": self.employee,
-                "attendance_date": date,
-                "docstatus": 2,
-                "name": ("!=", new_doc.name),
-            },
-            fields=["name", "in_time", "out_time", "working_hours", "half_day_status"],
-            order_by="modified desc",
-            limit=1,
-        )
-        if not cancelled:
-            return
-
-        old = cancelled[0]
-        checkins = frappe.get_all(
-            "Employee Checkin",
-            filters={"attendance": old.name},
-            pluck="name",
-        )
-        if not checkins and not (old.in_time or old.out_time):
-            return
-
-        for checkin_name in checkins:
-            frappe.db.set_value(
-                "Employee Checkin", checkin_name, "attendance", new_doc.name, update_modified=False
-            )
-
-        values = {}
-        if old.in_time:
-            values["in_time"] = old.in_time
-        if old.out_time:
-            values["out_time"] = old.out_time
-        if old.working_hours:
-            values["working_hours"] = old.working_hours
-        # If punches exist for the other half, keep Present (leave + worked other half)
-        if checkins or old.in_time or old.out_time:
-            if new_doc.status == "Half Day":
-                values["half_day_status"] = "Present"
-                values["modify_half_day_status"] = 0
-
-        if values:
-            frappe.db.set_value("Attendance", new_doc.name, values, update_modified=False)
-            new_doc.update(values)
+            # After leave-cancel / recreate, restore punches onto the new attendance
+            relink_checkins_from_cancelled_attendance(self.employee, new_doc, date)
 
     @frappe.whitelist()
     def get_attendance_warnings(self):
