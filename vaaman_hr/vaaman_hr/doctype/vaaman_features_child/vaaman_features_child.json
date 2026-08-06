@@ -13,14 +13,14 @@
    "fieldname": "feature",
    "fieldtype": "Select",
    "label": "Feature",
-   "options": "Attendance\nHoliday\nLeave\nAttendance Req\nShift Req\nMark Attendance\nLocation\nPayroll\nExpense Claim\nHelpDesk\nComp Off\nGRN\nStock Entry\nPurchase Order\nRefer\nVMS"
+   "options": "Attendance\nHoliday\nLeave\nAttendance Req\nShift Req\nMark Attendance\nLocation\nPayroll\nExpense Claim\nHelpDesk\nComp Off\nGRN\nStock Entry\nPurchase Order\nRefer\nVMS\nTeam"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-07-23 08:26:49.268140",
+ "modified": "2026-08-04 09:26:35.626715",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "Vaaman Features Child",

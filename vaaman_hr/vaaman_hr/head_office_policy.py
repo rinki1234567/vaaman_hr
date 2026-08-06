@@ -79,12 +79,18 @@ def get_required_full_day_hours(attendance_date, late_entry=0, early_exit=0):
 
 
 def is_head_office_employee(employee):
+	"""HO late/hours/half-day policy applies ONLY when Employee.branch is Head Office.
+
+	Other site/project branches are never covered by this policy.
+	"""
+	if not employee:
+		return False
 	return frappe.db.get_value("Employee", employee, "branch") == HEAD_OFFICE_BRANCH
 
 
 def head_office_branch_condition(alias="e"):
-	"""SQL fragment: employee or attendance custom_branch is Head Office."""
-	return f"({alias}.branch = '{HEAD_OFFICE_BRANCH}' OR att.custom_branch = '{HEAD_OFFICE_BRANCH}')"
+	"""SQL: restrict to Head Office employees only (Employee.branch)."""
+	return f"{alias}.branch = '{HEAD_OFFICE_BRANCH}'"
 
 
 def is_exempt_from_head_office_policy(attendance):
@@ -318,13 +324,14 @@ def compute_head_office_status(attendance_date, logs, leave_application=None, em
 	if is_beyond_allowed_late(in_dt) and not has_half_day_leave:
 		return working_hours, "Absent", "", 0, 0
 
-	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation)
+	# First half before full-day early-exit guard (afternoon OUT is not a 6:15 PM violation).
+	# half_day_status = Status for Other Half → second half not worked → Absent
 	if (
 		working_hours >= rules["min_half_day_hours"]
 		and working_hours < required_full_day_hours
 		and meets_first_half_timing(attendance_date, in_dt, out_dt)
 	):
-		return working_hours, "Half Day", "Present", late_entry, early_exit
+		return working_hours, "Half Day", "Absent", late_entry, early_exit
 
 	if is_beyond_allowed_early_exit(out_dt, attendance_date):
 		return working_hours, "Absent", "", 0, 0

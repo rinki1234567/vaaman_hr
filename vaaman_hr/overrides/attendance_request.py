@@ -4,6 +4,8 @@ from frappe.utils import add_days, date_diff
 
 from hrms.hr.doctype.attendance_request.attendance_request import AttendanceRequest
 
+from vaaman_hr.overrides.attendance_utils import relink_checkins_from_cancelled_attendance
+
 
 class CustomAttendanceRequest(AttendanceRequest):
 
@@ -93,6 +95,8 @@ class CustomAttendanceRequest(AttendanceRequest):
             new_doc.custom_branch = branch
             new_doc.insert(ignore_permissions=True)
             new_doc.submit()
+            # After leave-cancel / recreate, restore punches onto the new attendance
+            relink_checkins_from_cancelled_attendance(self.employee, new_doc, date)
 
     @frappe.whitelist()
     def get_attendance_warnings(self):

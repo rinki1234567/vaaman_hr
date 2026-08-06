@@ -12,6 +12,7 @@ from vaaman_hr.vaaman_hr.head_office_policy import (
 	has_approved_half_day_leave,
 	head_office_branch_condition,
 	is_exempt_from_head_office_policy,
+	is_head_office_employee,
 )
 
 ATTENDANCE_REQUEST_LEAVE_EXEMPT_SQL = """
@@ -45,6 +46,8 @@ def _amend_attendance_to_absent(record, reason, log_remarks, logs=None):
 	instead of cancel + amend, so no cancelled-document chain is created.
 	"""
 	original = frappe.get_doc("Attendance", record.name)
+	if not is_head_office_employee(original.employee):
+		return None
 	if is_exempt_from_head_office_policy(original):
 		return None
 

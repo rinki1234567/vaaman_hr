@@ -165,16 +165,36 @@ class CustomSalarySlip(ERPNextSalarySlip):
                     elif leave_type in PAID_LEAVE_TYPES or not leave_type:
                         payable_days += 1
                 elif status == "Half Day":
-                    if row.half_day_status == "Absent":
-                        # Present for half the day; other half is absent.
-                        payable_days += daily_wages_fraction_for_half_day
-                    elif row.leave_type in leave_type_map and (
+                    # Align with HRMS default (payroll_based_on=Attendance):
+                    # payment_days = working − LWP − absent − (Other Half Absent)×0.5
+                    # So: paid leave + Other Half Present → full day (1.0)
+                    is_lwp_or_ppl = row.leave_type in leave_type_map and (
                         leave_type_map[row.leave_type].get("is_lwp")
                         or leave_type_map[row.leave_type].get("is_ppl")
-                    ):
-                        payable_days += 1 - daily_wages_fraction_for_half_day
+                    )
+                    if row.half_day_status == "Absent":
+                        if is_lwp_or_ppl:
+                            # 0.5 LWP/PPL + 0.5 other-half absent → no pay for the day
+                            pass
+                        else:
+                            # Paid-leave half or worked half only
+                            payable_days += daily_wages_fraction_for_half_day
+                    elif is_lwp_or_ppl:
+                        # Unpaid leave half + other half Present → pay worked half only
+                        equivalent_lwp = 1 - daily_wages_fraction_for_half_day
+                        if leave_type_map[row.leave_type].get("is_ppl"):
+                            frac = (
+                                leave_type_map[row.leave_type].get(
+                                    "fraction_of_daily_salary_per_leave"
+                                )
+                                or 1
+                            )
+                            equivalent_lwp *= frac
+                        payable_days += 1 - equivalent_lwp
                     else:
-                        payable_days += daily_wages_fraction_for_half_day
+                        # Paid leave + Other Half Present (or Present without unpaid leave)
+                        # → count as full present (HRMS default)
+                        payable_days += 1
             elif current_date in national_holiday_dates:
                 payable_days += 1
             elif consider_unmarked_as == "Present" and not is_holiday:
@@ -217,12 +237,62 @@ class CustomSalarySlip(ERPNextSalarySlip):
             daily_wages_fraction_for_half_day,
         )
 
+    def _set_custom_paid_leaves(self, period_start=None, period_end=None, daily_wages_fraction_for_half_day=None):
+        """Count paid leave days from attendance — independent of weekly_off_on_attendance."""
+        if not self.employee:
+            self.custom_paid_leaves = 0
+            return
+
+        if period_start is None or period_end is None:
+            start_date = getdate(self.start_date)
+            end_date = getdate(self.end_date)
+            joining_date = getdate(self.joining_date) if self.joining_date else None
+            relieving_date = getdate(self.relieving_date) if self.relieving_date else None
+            period_start = max(start_date, joining_date) if joining_date else start_date
+            period_end = min(end_date, relieving_date) if relieving_date else end_date
+
+        if daily_wages_fraction_for_half_day is None:
+            daily_wages_fraction_for_half_day = (
+                flt(
+                    frappe.db.get_single_value(
+                        "Payroll Settings", "daily_wages_fraction_for_half_day"
+                    )
+                )
+                or 0.5
+            )
+
+        if period_end < period_start:
+            self.custom_paid_leaves = 0
+            return
+
+        attendance_rows = frappe.get_all(
+            "Attendance",
+            filters={
+                "employee": self.employee,
+                "attendance_date": ["between", [period_start, period_end]],
+                "docstatus": 1,
+                "status": ["in", ["On Leave", "Half Day"]],
+                "leave_type": ["in", list(PAID_LEAVE_TYPES)],
+            },
+            fields=["status", "leave_type"],
+        )
+
+        paid_leaves = 0
+        for row in attendance_rows:
+            if row.status == "On Leave":
+                paid_leaves += 1
+            elif row.status == "Half Day":
+                paid_leaves += daily_wages_fraction_for_half_day
+
+        self.custom_paid_leaves = paid_leaves
+
     def get_working_days_details(self, lwp=None, for_preview=0, lwp_days_corrected=None):
         """
-        Custom logic applies ONLY when:
+        Custom payment-days logic applies ONLY when:
         Salary Structure Assignment.weekly_off_on_attendance = 1
 
         Otherwise ERPNext default behavior is used.
+        custom_paid_leaves is always computed from attendance.
         """
         if not self.employee:
             return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
@@ -250,7 +320,10 @@ class CustomSalarySlip(ERPNextSalarySlip):
         )
 
         if not ssa:
-            return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
+            result = self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
+            if not for_preview:
+                self._set_custom_paid_leaves()
+            return result
 
         (
             weekly_off_on_attendance,
@@ -261,7 +334,10 @@ class CustomSalarySlip(ERPNextSalarySlip):
         ) = ssa
 
         if not cint(weekly_off_on_attendance):
-            return self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
+            result = self.call_super_working_days(lwp, for_preview, lwp_days_corrected)
+            if not for_preview:
+                self._set_custom_paid_leaves()
+            return result
 
         override_absent_on_holiday = cint(override_absent_on_holiday or 0)
         mark_absent_on_public_holiday = cint(mark_absent_on_public_holiday or 0)
@@ -379,15 +455,9 @@ class CustomSalarySlip(ERPNextSalarySlip):
         )
         self.custom_public_holiday = len(pph_holiday_dates)
 
-        paid_leaves = 0
-        for row in attendance_by_date.values():
-            if row.leave_type in PAID_LEAVE_TYPES:
-                if row.status == "On Leave":
-                    paid_leaves += 1
-                elif row.status == "Half Day":
-                    paid_leaves += daily_wages_fraction_for_half_day
-
-        self.custom_paid_leaves = paid_leaves
+        self._set_custom_paid_leaves(
+            period_start, period_end, daily_wages_fraction_for_half_day
+        )
 
         actual_lwp = self._calculate_actual_lwp(payroll_settings, holidays, period_start, period_end)
 

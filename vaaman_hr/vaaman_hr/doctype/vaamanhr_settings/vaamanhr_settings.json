@@ -8,6 +8,7 @@
   "location_t_section",
   "branch",
   "given_features",
+  "device_binding",
   "attendance_by",
   "app_version",
   "shift_end_cushion"
@@ -45,12 +46,18 @@
    "fieldtype": "Select",
    "label": "Attendance By",
    "options": "\nEmployee checkin\nFace and geo"
+  },
+  {
+   "default": "0",
+   "fieldname": "device_binding",
+   "fieldtype": "Check",
+   "label": "Device Binding (Mobile)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-23 08:21:11.427060",
+ "modified": "2026-08-04 09:39:51.042888",
  "modified_by": "Administrator",
  "module": "Vaaman Hr",
  "name": "VaamanHR Settings",

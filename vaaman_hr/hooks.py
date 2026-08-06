@@ -131,6 +131,7 @@ after_migrate = [
 override_doctype_class = {
         "Attendance": "vaaman_hr.vaaman_hr.api.vaaman_hr" ,
         "Attendance Request": "vaaman_hr.overrides.attendance_request.CustomAttendanceRequest",
+        "Leave Application": "vaaman_hr.overrides.leave_application.CustomLeaveApplication",
         "Compensatory Leave Request": "vaaman_hr.vaaman_hr.compoff.CompOff",
         "Leave Policy Assignment": "vaaman_hr.overrides.leave_policy_assignment.CustomLeavePolicyAssignment",
         "Salary Slip": "vaaman_hr.overrides.salary_slip.CustomSalarySlip"
@@ -152,7 +153,12 @@ override_doctype_class = {
 
 doc_events = {
     "Attendance": {
-        "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.validate_half_day_attendance"
+        "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.validate_half_day_attendance",
+        "on_update": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_update",
+    },
+    "Employee Checkin": {
+        "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_checkin",
+        "on_update": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_checkin",
     },
     
     "OverTime Import": {
@@ -180,8 +186,10 @@ doc_events = {
     },
     "Salary Structure Assignment": {
         "before_save": "vaaman_hr.vaaman_hr.salery_component_field_add_buttton.on_salary_assignment_update"
-    }
-
+    },
+    "Employee": {
+    "on_update": "vaaman_hr.vaaman_hr.doctype.employee_helper.update_branch.update_branch"
+    },
 }
 
 
@@ -317,5 +325,8 @@ fixtures = [
     # {"dt":"Property Setter","filter":[["module","=","Vaaman Hr"]]}
     
 ]
+
+on_login = "vaaman_hr.api2.validate_device_on_login" 
+
 # Ensure the function is called during startup
 apply_monkey_patch()
