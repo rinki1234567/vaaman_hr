@@ -251,9 +251,14 @@ scheduler_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "vaaman_hr.event.get_events"
-# }
+override_whitelisted_methods = {
+	"hrms.hr.doctype.leave_application.leave_application.get_leave_balance_on": (
+		"vaaman_hr.overrides.leave_balance.get_leave_balance_on"
+	),
+	"hrms.hr.doctype.leave_application.leave_application.get_leave_details": (
+		"vaaman_hr.overrides.leave_balance.get_leave_details"
+	),
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

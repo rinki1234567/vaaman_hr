@@ -115,22 +115,35 @@ def get_data(filters: Filters) -> list:
 
 		for employee_name in employee_names:
 			key = (employee_name, leave_type)
-			new_allocation = flt(allocated_map.get(key, 0))
-			expired_leaves = flt(expired_map.get(key, 0))
-			leaves_taken = flt(taken_map.get(key, 0))
-			carry_forwarded = flt(cf_map.get(key, 0))
 
-			previous = previous_allocations.get(key)
-			if (
-				previous
-				and previous.get("to_date")
-				and getdate(previous.to_date) == getdate(opening_balance_date)
-			):
-				opening = carry_forwarded
+			if leave_type == "Compensatory Off":
+				from vaaman_hr.overrides.comp_off_balance import get_comp_off_balance_on
+
+				opening = flt(get_comp_off_balance_on(employee_name, opening_balance_date))
+				closing = flt(get_comp_off_balance_on(employee_name, to_date))
+				new_allocation = flt(allocated_map.get(key, 0))
+				leaves_taken = flt(taken_map.get(key, 0))
+				# Expired = what fell off between opening and closing after accounting for new/taken
+				expired_leaves = flt(opening + new_allocation - leaves_taken - closing)
+				if expired_leaves < 0:
+					expired_leaves = 0
 			else:
-				opening = flt(opening_map.get(key, 0))
+				new_allocation = flt(allocated_map.get(key, 0))
+				expired_leaves = flt(expired_map.get(key, 0))
+				leaves_taken = flt(taken_map.get(key, 0))
+				carry_forwarded = flt(cf_map.get(key, 0))
 
-			closing = new_allocation + opening - (expired_leaves + leaves_taken)
+				previous = previous_allocations.get(key)
+				if (
+					previous
+					and previous.get("to_date")
+					and getdate(previous.to_date) == getdate(opening_balance_date)
+				):
+					opening = carry_forwarded
+				else:
+					opening = flt(opening_map.get(key, 0))
+
+				closing = new_allocation + opening - (expired_leaves + leaves_taken)
 
 			# Skip empty rows to avoid noise and extra work in the UI
 			if not any(
