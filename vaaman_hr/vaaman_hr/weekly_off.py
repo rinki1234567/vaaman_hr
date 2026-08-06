@@ -13,6 +13,8 @@ def set_total_weekly_off(doc, method):
     employee = doc.employee
     from_date = getdate(doc.start_date)
     to_date = getdate(doc.end_date)
+    if doc.relieving_date:
+        to_date = min(to_date, getdate(doc.relieving_date))
 
     # Get active Salary Structure Assignment
     assignment = frappe.get_all(
@@ -81,6 +83,8 @@ def before_save(doc, method):
 
         from_date = getdate(doc.start_date)
         to_date = getdate(doc.end_date)
+        if doc.relieving_date:
+            to_date = min(to_date, getdate(doc.relieving_date))
         employee = doc.employee
 
         # ----- Recalculate total_weekly_off dynamically -----
