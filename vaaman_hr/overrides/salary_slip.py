@@ -101,6 +101,14 @@ class CustomSalarySlip(ERPNextSalarySlip):
             return True
         return bool(cint(ssa_flag)) if not joining_date else False
 
+    def _is_current_month_relieving(self, start_date=None, end_date=None, relieving_date=None):
+        """True when relieving date falls within this payroll month."""
+        start_date = getdate(start_date or self.start_date)
+        end_date = getdate(end_date or self.end_date)
+        relieving_date = getdate(relieving_date) if relieving_date else None
+
+        return bool(relieving_date and start_date <= relieving_date <= end_date)
+
     def get_data_for_eval(self):
         data, default_data = super().get_data_for_eval()
         is_join_month = self._is_current_month_joining(
@@ -353,7 +361,9 @@ class CustomSalarySlip(ERPNextSalarySlip):
 
         if period_end < period_start:
             total_working_days = 0
-        elif self._is_current_month_joining(start_date, end_date, joining_date, current_month_joining):
+        elif self._is_current_month_joining(
+            start_date, end_date, joining_date, current_month_joining
+        ) or self._is_current_month_relieving(start_date, end_date, relieving_date):
             total_working_days = (end_date - start_date).days + 1
         else:
             total_working_days = (period_end - period_start).days + 1
