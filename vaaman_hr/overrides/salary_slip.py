@@ -398,17 +398,21 @@ class CustomSalarySlip(ERPNextSalarySlip):
         )
         attendance_by_date = {getdate(row.attendance_date): row for row in attendance_rows}
 
-        # When current-month joiners use the full payroll month as working days,
-        # unmarked days before DOJ must still reduce payment days.
+        # When current-month joiners/relievers use the full payroll month as working
+        # days, days outside the employment period must still reduce payment days.
         is_join_month = self._is_current_month_joining(
             start_date, end_date, joining_date, current_month_joining
         )
+        is_relieve_month = self._is_current_month_relieving(
+            start_date, end_date, relieving_date
+        )
         attendance_count_start = start_date if is_join_month else period_start
+        attendance_count_end = end_date if is_relieve_month else period_end
 
         absent_days = 0
         unmarked_days = 0
         current_date = attendance_count_start
-        while current_date <= period_end:
+        while current_date <= attendance_count_end:
             is_holiday = current_date in holidays
             row = attendance_by_date.get(current_date)
             status = row.status if row else None
@@ -422,7 +426,11 @@ class CustomSalarySlip(ERPNextSalarySlip):
                 elif override_absent_on_holiday or not is_holiday:
                     absent_days += 1
             elif status is None:
-                if not is_holiday:
+                # After relieving (full-month TWD): always unpaid, including holidays.
+                if is_relieve_month and current_date > period_end:
+                    unmarked_days += 1
+                    absent_days += 1
+                elif not is_holiday:
                     unmarked_days += 1
                     if consider_unmarked_as == "Absent":
                         absent_days += 1
