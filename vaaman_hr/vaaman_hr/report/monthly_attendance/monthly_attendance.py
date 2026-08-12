@@ -1970,9 +1970,10 @@ def get_attendance_status_for_detailed_view(
                     abbr = "WO"
                     t_wo += 1
                 else:
-                    t_un += 1
-                    
-                    
+                    abbr = "A"
+                    t_a += 1
+
+
             # HTML Formatting
             if "HD" in abbr:
                 row[cstr(day)] = f"<span style='color:orange; font-weight:bold'>{abbr}</span>"
