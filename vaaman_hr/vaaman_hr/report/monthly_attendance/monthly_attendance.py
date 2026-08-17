@@ -1118,13 +1118,7 @@ def get_columns(filters: Filters) -> list[dict]:
 
     columns.extend(
         [
-            {
-                "label": _("Employee"),
-                "fieldname": "employee",
-                "fieldtype": "Link",
-                "options": "Employee",
-                "width": 135,
-            },
+            {"label": _("Employee"), "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 135,},
             {"label": _("Employee Name"), "fieldname": "employee_name", "fieldtype": "Data", "width": 120},
             {"label": _("Staff/Worker"), "fieldname": "custom_staffworker", "fieldtype":"Data", "width": 110},
             {"label": _("Get Pass Number"), "fieldname": "attendance_device_id", "fieldtype": "Data", "width": 120},
@@ -1134,65 +1128,25 @@ def get_columns(filters: Filters) -> list[dict]:
     if filters.summarized_view:
         columns.extend(
             [
-                {
-                    "label": _("Total Present"),
-                    "fieldname": "total_present",
-                    "fieldtype": "Float",
-                    "width": 110,
-                },
+                {"label": _("Total Present"), "fieldname": "total_present" ,"fieldtype": "Float", "width": 110,},
                 {"label": _("Total Leaves"), "fieldname": "total_leaves", "fieldtype": "Float", "width": 110},
                 {"label": _("Total Absent"), "fieldname": "total_absent", "fieldtype": "Float", "width": 110},
-                {
-                    "label": _("Total Holidays"),
-                    "fieldname": "total_holidays",
-                    "fieldtype": "Float",
-                    "width": 120,
-                },
-                {
-                    "label": _("Total Weekly Off"),
-                    "fieldname": "total_weekly_off",
-                    "fieldtype": "Float",
-                    "width": 120,
-                },
+                {"label": _("Total Holidays"), "fieldname": "total_holidays", "fieldtype": "Float", "width": 120,},
+                {"label": _("Total Weekly Off"), "fieldname": "total_weekly_off", "fieldtype": "Float", "width": 120,},
                 
-                {
-                    "label": _("PPH"),
-                    "fieldname": "pph",
-                    "fieldtype": "Float",
-                    "width": 120,
-                    },
+                {"label": _("PPH"),"fieldname": "pph", "fieldtype": "Float", "width": 120,},
                 
                 {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
                
-                {
-                    "label": _("Unmarked Days"),
-                    "fieldname": "unmarked_days",
-                    "fieldtype": "Float",
-                    "width": 130,
-                },
-                {
-                    "label": _("Additional OT"),
-                    "fieldname": "additinal_ot",
-                    "fieldtype": "Float",
-                    "width": 140
-                },
+                {"label": _("Unmarked Days"),"fieldname": "unmarked_days", "fieldtype": "Float","width": 130,},
+                {"label": _("Additional OT"), "fieldname": "additinal_ot", "fieldtype": "Float", "width": 140},
             ]
         )
         columns.extend(get_columns_for_leave_types())
         columns.extend(
             [
-                {
-                    "label": _("Total Late Entries"),
-                    "fieldname": "total_late_entries",
-                    "fieldtype": "Float",
-                    "width": 140,
-                },
-                {
-                    "label": _("Total Early Exits"),
-                    "fieldname": "total_early_exits",
-                    "fieldtype": "Float",
-                    "width": 140,
-                },
+                {"label": _("Total Late Entries"), "fieldname": "total_late_entries", "fieldtype": "Float", "width": 140,},
+                {"label": _("Total Early Exits"),"fieldname": "total_early_exits", "fieldtype": "Float", "width": 140,},
             ]
         )
     else:
@@ -1283,31 +1237,11 @@ def get_columns(filters: Filters) -> list[dict]:
         "fieldtype": "Float",
         "width": 140
         },
-        {
-        "label": _("PPH"),
-        "fieldname": "pph",
-        "fieldtype": "Float",
-        "width": 120
-        },
-        {
-        "label": _("Total Late Entries"),
-        "fieldname": "total_late_entries",
-        "fieldtype": "Float",
-        "width": 160
-        },
-        {
-        "label": _("Total Early Exits"),
-        "fieldname": "total_early_exits",
-        "fieldtype": "Int",
-        "width": 160
-        },
+        {"label": _("PPH"), "fieldname": "pph", "fieldtype": "Float", "width": 120},
+        {"label": _("Total Late Entries"), "fieldname": "total_late_entries", "fieldtype": "Float", "width": 160},
+        {"label": _("Total Early Exits"), "fieldname": "total_early_exits", "fieldtype": "Int", "width": 160},
         {"label": "Total  Overtime", "fieldname": "total_overtime", "fieldtype": "Float", "width": 150},
-        {
-        "label": _("Additional OT"),
-        "fieldname": "additinal_ot",
-        "fieldtype": "Float",
-        "width": 140
-        },
+        {"label": _("Additional OT"), "fieldname": "additinal_ot", "fieldtype": "Float", "width": 140},
        
         ])
     return columns
@@ -1888,7 +1822,15 @@ def get_attendance_status_for_detailed_view(
                                 t_l += 0.5
                             if lt_key:
                                 row[lt_key] = row.get(lt_key, 0.0) + 0.5
-                                
+                    elif day_att.leave_application:           
+                        abbr = f"HD/{m_leave_abbr}/A"
+                        if m_leave_type != "Leave Without Pay":
+                            t_l += 0.5
+                        if lt_key:
+                            row[lt_key] = row.get(lt_key, 0.0) + 0.5
+                            t_a += 0.5
+                            
+
                         else:
                             abbr = "HD/P/A"
                             t_a += 0.5
@@ -1939,11 +1881,14 @@ def get_attendance_status_for_detailed_view(
                                 t_a += 0.5
                                 t_p += 0.5
                 elif day_att.status == "On Leave":
-                    abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
-                    if m_leave_type != "Leave Without Pay":
-                        t_l += 1.0
-                    if lt_key:
-                        row[lt_key] = row.get(lt_key, 0.0) + 1.0
+                    if day_att.leave_application:
+                        abbr = "/".join(day_leaves) if day_leaves else (m_leave_abbr or "L")
+                        if m_leave_type != "Leave Without Pay":
+                            t_l += 1.0
+                        if lt_key:
+                            row[lt_key] = row.get(lt_key, 0.0) + 1.0
+                    else:
+                        abbr = "L"
                 else:
                     abbr = status_map.get(day_att.status, "")
                     if abbr in ("P", "WFH"):
