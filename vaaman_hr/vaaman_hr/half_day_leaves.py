@@ -7,6 +7,7 @@ from vaaman_hr.vaaman_hr.head_office_policy import (
     get_policy_punch_times,
     is_exempt_from_head_office_policy,
     is_head_office_employee,
+    get_rules,
 )
 
 # Re-apply only for recent days so historical attendance is not rewritten
@@ -132,8 +133,8 @@ def apply_head_office_policy_to_attendance(doc, method=None, *, enforce_lookback
     
     if is_half_day_leave:
         status = "Half Day"
-        
-        if flt(working_hours) < 4.5:
+        rules = get_rules(doc.attendance_date)
+        if flt(working_hours) < rules["min_half_day_hours"]:
             half_day_status = "Absent"
         else:
             half_day_status = "Present"
