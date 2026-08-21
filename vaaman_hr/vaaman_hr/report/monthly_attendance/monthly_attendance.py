@@ -593,6 +593,7 @@ def get_attendance_status_for_summarized_view(employee: str, filters: Filters, h
         "total_weekly_off": res.get("total_weekly_off", 0),
         "pph": res.get("pph", 0),
         "unmarked_days": res.get("unmarked_days", 0),
+    
     }
 def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[dict, list]:
     Attendance = frappe.qb.DocType("Attendance")
@@ -650,7 +651,7 @@ def get_attendance_summary_and_days(employee: str, filters: Filters) -> tuple[di
 
 
 def get_attendance_status_for_detailed_view(
-    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None, relieving_date=None,last_marked_day: int = 0
+    employee: str, filters: Filters, employee_attendance: dict, holidays: list, date_of_joining=None, relieving_date=None, last_marked_day: int = 0
 
 ) -> list[dict]:
 
@@ -939,7 +940,7 @@ def get_attendance_status_for_detailed_view(
                 row[cstr(day)] = f"<span style='color:green; font-weight:bold'>{abbr}</span>"
             else:
                 row[cstr(day)] = abbr
-
+         
         row.update({
             "total_present": t_p, 
             "total_leaves": t_l, 
