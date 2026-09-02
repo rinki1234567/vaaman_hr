@@ -6,7 +6,11 @@ from frappe.query_builder.functions import Count
 from frappe.utils import cint, flt, getdate
 from packaging import version
 
-from hrms.payroll.doctype.salary_slip.salary_slip import SalarySlip as ERPNextSalarySlip
+from hrms.payroll.doctype.salary_slip.salary_slip import(
+    SalarySlip as ERPNextSalarySlip,
+    get_additional_salaries,
+    get_salary_component_data,
+)
 
 # ==========================================
 # VERSION DETECTION
@@ -68,7 +72,163 @@ class CustomSalarySlip(ERPNextSalarySlip):
             return super().get_working_days_details(lwp, for_preview, lwp_days_corrected)
 
         return super().get_working_days_details(lwp, for_preview)
+    
+    
+    def add_additional_salary_components(self, component_type):
+        additional_salaries = get_additional_salaries(
+            self.employee, self.start_date, self.end_date, component_type
+        )
 
+        for additional_salary in additional_salaries:
+            component_data = get_salary_component_data(additional_salary.component)
+            remove_if_zero_valued = frappe.get_cached_value(
+                "Salary Component", additional_salary.component, "remove_if_zero_valued"
+            )
+            # if flt(additional_salary.amount) == 0 and remove_if_zero_valued:
+            # 	continue
+            self.update_component_row(
+                component_data,
+                additional_salary.amount,
+                component_type,
+                additional_salary,
+                is_recurring=additional_salary.is_recurring,
+            )
+
+            if component_type == "earnings" and hasattr(self, "benefit_ledger_components"):
+                if (
+                    additional_salary.ref_doctype == "Employee Benefit Claim"
+                    and component_data.is_flexible_benefit
+                ) or component_data.accrual_component:
+                    # track benefit claim or accrual component payout to record in Employee Benefit Ledger
+                    if additional_salary.ref_doctype == "Employee Benefit Claim":
+                        remarks = f"Payout against Employee Benefit Claim {additional_salary.ref_docname}"
+                        flexible_benefit = 1
+                    else:
+                        remarks = "Accrual Component payout via Additional Salary"
+                        flexible_benefit = 0
+
+                    self.benefit_ledger_components.append(
+                        {
+                            "salary_component": additional_salary.component,
+                            "amount": additional_salary.amount,
+                            "is_accrual": 0,
+                            "transaction_type": "Payout",
+                            "flexible_benefit": flexible_benefit,
+                            "remarks": remarks,
+                        }
+                    )
+
+
+    def update_component_row(
+        self,
+        component_data,
+        amount,
+        component_type,
+        additional_salary=None,
+        is_recurring=0,
+        data=None,
+        default_amount=None,
+        remove_if_zero_valued=None,
+    ):
+        component_row = None
+        for d in self.get(component_type):
+            if d.salary_component != component_data.salary_component:
+                continue
+
+            if (not d.additional_salary and (not additional_salary or additional_salary.overwrite)) or (
+                additional_salary and additional_salary.name == d.additional_salary
+            ):
+                component_row = d
+                break
+
+        if additional_salary and additional_salary.overwrite:
+            # Additional Salary with overwrite checked, remove default rows of same component
+            self.set(
+                component_type,
+                [
+                    d
+                    for d in self.get(component_type)
+                    if d.salary_component != component_data.salary_component
+                    or (d.additional_salary and additional_salary.name != d.additional_salary)
+                    or d == component_row
+                ],
+            )
+
+        if not component_row:
+            if not (amount or default_amount) and remove_if_zero_valued:
+                return
+
+            component_row = self.append(component_type)
+            for attr in (
+                "depends_on_payment_days",
+                "salary_component",
+                "abbr",
+                "do_not_include_in_total",
+                "do_not_include_in_accounts",
+                "accrual_component",
+                "is_tax_applicable",
+                "is_flexible_benefit",
+                "variable_based_on_taxable_salary",
+                "exempted_from_income_tax",
+            ):
+                component_row.set(attr, component_data.get(attr))
+
+        if additional_salary:
+            if additional_salary.overwrite:
+                component_row.additional_amount = flt(
+                    flt(amount) - flt(component_row.get("default_amount", 0)),
+                    component_row.precision("additional_amount"),
+                )
+            else:
+                component_row.default_amount = 0
+                component_row.additional_amount = amount
+
+            component_row.is_recurring_additional_salary = is_recurring
+            component_row.additional_salary = additional_salary.name
+            component_row.deduct_full_tax_on_selected_payroll_date = (
+                additional_salary.deduct_full_tax_on_selected_payroll_date
+            )
+        else:
+            component_row.default_amount = default_amount or amount
+            component_row.additional_amount = 0
+            component_row.deduct_full_tax_on_selected_payroll_date = (
+                component_data.deduct_full_tax_on_selected_payroll_date
+            )
+
+        component_row.amount = amount
+
+        # Skip payment days adjustment for:
+        # 1. Arrear/Payroll Correction additional salary - already calculated based on LWP days in previous cycles
+        # 2. Employee Benefit Claim - payout often includes amount for previous cycles
+        # 2. Accrual components - paid based on accrual amounts from previous cycles
+        
+        
+        
+        # skip_payment_days_adjustment = (
+        # 	additional_salary
+        # 	and additional_salary.get("ref_doctype")
+        # 	in ["Arrear", "Payroll Correction", "Employee Benefit Claim"]
+        # ) or component_row.accrual_component
+        skip_payment_days_adjustment = (
+            (
+                additional_salary
+                and additional_salary.overwrite
+                and flt(amount) == 0
+            )
+           or (
+                additional_salary
+                and additional_salary.get("ref_doctype")
+                in ["Arrear", "Payroll Correction", "Employee Benefit Claim"]
+            )
+            or component_row.accrual_component
+        )
+
+        if not skip_payment_days_adjustment:
+            self.update_component_amount_based_on_payment_days(component_row, remove_if_zero_valued)
+
+        if data:
+            data[component_row.abbr] = component_row.amount
+    
     def _get_payroll_settings(self):
         return frappe.get_cached_value(
             "Payroll Settings",
@@ -121,7 +281,7 @@ class CustomSalarySlip(ERPNextSalarySlip):
             data.joining_date = joining_date
             default_data.joining_date = joining_date
         return data, default_data
-
+    
     def _count_payable_attendance_days(
         self,
         attendance_by_date,
@@ -571,4 +731,3 @@ class CustomSalarySlip(ERPNextSalarySlip):
                     self.payment_days += lwp_days_corrected
             except ImportError:
                 pass
-        
