@@ -2141,13 +2141,13 @@ def get_holiday_status(day: int, holidays: list) -> str:
             return "Holiday"
     return None
 # Paid days calculation is based on the total present days, total leaves, and total holidays.
-def calculate_paid_days(branch, staff_worker, t_p, t_l, t_wo, t_h, t_pph,total_days):
+def calculate_paid_days(branch, staffworker, t_p, t_l, t_wo, t_h, t_pph,total_days):
 
     payment_master = frappe.db.get_value(
         "Payment Days Master",
         {
             "branch": branch,
-            "staff_worker": staff_worker,
+            "staffworker": staffworker,
             "is_active": 1
         },
         [
@@ -2159,7 +2159,7 @@ def calculate_paid_days(branch, staff_worker, t_p, t_l, t_wo, t_h, t_pph,total_d
     )
 
     if not  payment_master:
-        return t_p + t_l ,0
+        return 0,0
     formula = payment_master.payment_days_formula
     month_days_based = payment_master.custom_month_days_based
 
