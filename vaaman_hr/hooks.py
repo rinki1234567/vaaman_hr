@@ -156,9 +156,9 @@ doc_events = {
         "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.validate_half_day_attendance",
         "on_update": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_update",
     },
-    "Leave Application": {
-        "after_submit": "vaaman_hr.overrides.leave_application.update_other_half_on_half_day_leave",
-    },
+    # "Leave Application": {
+    #     "after_submit": "vaaman_hr.overrides.leave_application.update_other_half_on_half_day_leave",
+    # },
     "Employee Checkin": {
         "after_insert": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_checkin",
         "on_update": "vaaman_hr.vaaman_hr.half_day_leaves.reapply_half_day_attendance_on_checkin",

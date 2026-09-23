@@ -206,7 +206,23 @@ class CustomLeaveApplication(LeaveApplication):
                     doc,
                     enforce_lookback=False,
                 )
-
+                # Set other half as Present for Attendance Request + Half Day Leave case
+                if (
+                    doc.status == "Half Day"
+                    and doc.attendance_request
+                    and doc.leave_application
+                    and doc.half_day_status == "Absent"
+                ):
+                    frappe.db.set_value(
+                        "Attendance",
+                        doc.name,
+                        {
+                            "half_day_status": "Present",
+                            "modify_half_day_status": 1,
+                        },
+                        update_modified=False,
+                    )
+            
             # -----------------------------------------------------
             # OTHER BRANCHES
             # Keep existing behavior unchanged.
@@ -254,39 +270,3 @@ class CustomLeaveApplication(LeaveApplication):
 
 
 
-def update_other_half_on_half_day_leave(doc, method=None):
-    if not doc.half_day or not doc.half_day_date:
-        return
-
-    attendance_name = frappe.db.get_value(
-        "Attendance",
-        {
-            "employee": doc.employee,
-            "attendance_date": doc.half_day_date,
-            "docstatus": 1,
-        },
-        "name",
-    )
-
-    if not attendance_name:
-        return
-
-    attendance = frappe.get_doc("Attendance", attendance_name)
-
-    if (
-        attendance.status == "Half Day"
-        and attendance.attendance_request
-        and attendance.half_day_status == "Absent"
-    ):
-        frappe.db.set_value(
-            "Attendance",
-            attendance.name,
-            {
-                "half_day_status": "Present",
-                "modify_half_day_status": 1,
-            },
-            update_modified=False,
-        )
-
-    
-        
